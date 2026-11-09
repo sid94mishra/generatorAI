@@ -157,11 +157,11 @@ export {
 // sha256 so CI's `git diff --exit-code` turns upstream drift into a failing
 // build rather than a runtime decode error.
 //
-//   ACP      → `@agentclientprotocol/sdk@1.4.0`'s own `schema/schema.json`,
+//   ACP      → `@agentclientprotocol/sdk@2.5.0`'s own `schema/v1/schema.unstable.json`,
 //              resolved through the pinned dependency's exports map.
 //   Codex    → `schemas/codex/codex_app_server_protocol.schemas.json`, produced
 //              by `codex app-server generate-json-schema` from
-//              `@openai/codex@0.151.0`. 686 definitions, including the whole
+//              `@openai/codex@0.167.0`. 750 definitions, including the whole
 //              `thread/*` + `turn/*` v2 surface.
 //   OpenCode → `schemas/opencode/openapi.json`, the OpenAPI 3.1 document
 //              `opencode serve` publishes at `GET /doc` on `opencode-ai@1.19.5`.

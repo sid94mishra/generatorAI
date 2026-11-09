@@ -45,7 +45,7 @@ import { Readable, Writable } from 'node:stream';
 // did, eagerly, and `HarnessFactory` still does) pulled the whole ACP SDK into
 // the process at boot. `import type * as` keeps every type reference below
 // working and is erased entirely by the compiler.
-import type * as acp from '@agentclientprotocol/sdk';
+import type * as acp from '@agentclientprotocol/sdk/unstable';
 import type {
   IAgentHarness,
   CreateConversationParams,
@@ -70,7 +70,7 @@ import type { AcpProviderOptions } from '../../types.js';
 // `import type * as` — erased at compile time, so the SDK is still only
 // loaded by the dynamic `import()` below (W41). The inline `typeof import()`
 // form this replaces is what `consistent-type-imports` forbids.
-import type * as AcpSdkNs from '@agentclientprotocol/sdk';
+import type * as AcpSdkNs from '@agentclientprotocol/sdk/unstable';
 type AcpSdk = typeof AcpSdkNs;
 
 let acpSdk: AcpSdk | null = null;
@@ -79,7 +79,7 @@ let acpSdkLoading: Promise<AcpSdk> | null = null;
 /** Resolve `@agentclientprotocol/sdk` on first use. */
 async function loadAcpSdk(): Promise<AcpSdk> {
   if (acpSdk) return acpSdk;
-  acpSdkLoading ??= import('@agentclientprotocol/sdk')
+  acpSdkLoading ??= import('@agentclientprotocol/sdk/unstable')
     .then((mod) => {
       acpSdk = mod;
       return mod;

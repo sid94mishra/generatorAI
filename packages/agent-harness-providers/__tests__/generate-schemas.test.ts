@@ -24,7 +24,7 @@ import { emitModule, runGenerator } from '../../../scripts/generate-schemas.js';
 const require = createRequire(import.meta.url);
 
 /** The real pinned artifact — the same one the generator reads. */
-const ACP_ARTIFACT = require.resolve('@agentclientprotocol/sdk/schema/schema.json');
+const ACP_ARTIFACT = require.resolve('@agentclientprotocol/sdk/schema/v1/schema.unstable.json');
 
 const META = {
   protocol: 'acp',
@@ -435,7 +435,7 @@ describe('the repo manifest', () => {
     expect(manifest.protocols['acp']).toMatchObject({
       status: 'generated',
       npmPackage: '@agentclientprotocol/sdk',
-      artifactExport: './schema/schema.json',
+      artifactExport: './schema/v1/schema.unstable.json',
     });
   });
 

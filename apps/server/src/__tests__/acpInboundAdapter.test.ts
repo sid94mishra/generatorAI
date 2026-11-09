@@ -22,7 +22,7 @@
 
 /* W10 */
 
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import type { EventBus } from '@generatorai/core';
 import type { PersistedEvent } from '@generatorai/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -370,9 +370,10 @@ describe('AcpInboundAdapter — initialize', () => {
     const { adapter, bridge } = makeFixture();
     const client = await connectClient(adapter);
 
+    // SDK 2.x refuses it at the connection ("must be initialized before 'session/new'") before the adapter's own check.
     await expect(
       client.agent.request(acp.methods.agent.session.new, { cwd: CWD, mcpServers: [] }),
-    ).rejects.toThrow(/not initialized/i);
+    ).rejects.toThrow(/not initialized|must be initialized/i);
     expect(bridge.createSession).not.toHaveBeenCalled();
 
     client.close();

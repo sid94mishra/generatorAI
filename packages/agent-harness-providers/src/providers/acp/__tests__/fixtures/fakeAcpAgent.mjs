@@ -27,7 +27,7 @@
 // transport.
 // ────────────────────────────────────────────────────────────────
 
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { Readable, Writable } from 'node:stream';
 
 /** sessionId -> AbortController for the in-flight prompt, if any. */

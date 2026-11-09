@@ -28,7 +28,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable, Writable } from 'node:stream';
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { AppConfigSchema, isPlanAction } from '@generatorai/shared';
 import type { HarnessConfig } from '@generatorai/shared';
 import { createContainer } from './composition-root.js';

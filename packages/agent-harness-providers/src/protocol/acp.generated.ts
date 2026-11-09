@@ -1,8 +1,8 @@
 // AUTO-GENERATED — do not edit. Run `pnpm generate:schemas` to update.
 // Protocol:        acp
-// Source artifact: @agentclientprotocol/sdk@1.4.0 → ./schema/schema.json
-// Artifact sha256: 7f77702b34e0a0558e77220e9007bf8ee161a976bb8ac5021aba1b7e7b2c5708
-// Definitions:     265
+// Source artifact: @agentclientprotocol/sdk@2.5.0 → ./schema/v1/schema.unstable.json
+// Artifact sha256: cff9aa6f463eccfff38c0918fc57ada6efd1952a2b7868baba432b5dc8aaeb59
+// Definitions:     252
 //
 // The sha256 above is of the upstream file itself. If the pinned dependency
 // changes, this hash and the types below change with it, and CI's
@@ -16,7 +16,7 @@ export type AgentRequest = {
   /** The method name to invoke. */
   method: string;
   /** Method-specific request parameters. */
-  params?: (WriteTextFileRequest | ReadTextFileRequest | RequestPermissionRequest | CreateTerminalRequest | TerminalOutputRequest | ReleaseTerminalRequest | WaitForTerminalExitRequest | KillTerminalRequest | CreateElicitationRequest | ConnectMcpRequest | MessageMcpRequest | DisconnectMcpRequest | ExtRequest) | null;
+  params?: (WriteTextFileRequest | ReadTextFileRequest | RequestPermissionRequest | CreateTerminalRequest | TerminalOutputRequest | ReleaseTerminalRequest | WaitForTerminalExitRequest | KillTerminalRequest | CreateElicitationRequest | MessageMcpRequest | ExtRequest) | null;
 };
 
 /**
@@ -49,7 +49,7 @@ export type WriteTextFileRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -57,10 +57,10 @@ export type WriteTextFileRequest = {
 /**
  * A unique identifier for a conversation session between a client and agent.
  *
- * Sessions maintain their own context, conversation history, and state,
- * allowing multiple independent interactions with the same agent.
+ * Each session has its own context, conversation history, and state, so one
+ * agent can run several independent sessions.
  *
- * See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)
+ * See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/v1/draft/session-setup#session-id)
  */
 export type SessionId = string;
 
@@ -83,7 +83,7 @@ export type ReadTextFileRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -93,7 +93,7 @@ export type ReadTextFileRequest = {
  *
  * Sent when the agent needs authorization before performing a sensitive operation.
  *
- * See protocol docs: [Requesting Permission](https://agentclientprotocol.com/protocol/tool-calls#requesting-permission)
+ * See protocol docs: [Requesting Permission](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#requesting-permission)
  */
 export type RequestPermissionRequest = {
   /** The session ID for this request. */
@@ -107,7 +107,7 @@ export type RequestPermissionRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -118,7 +118,7 @@ export type RequestPermissionRequest = {
  * Used to report progress and results as tools execute. All fields except
  * the tool call ID are optional - only changed fields need to be included.
  *
- * See protocol docs: [Updating](https://agentclientprotocol.com/protocol/tool-calls#updating)
+ * See protocol docs: [Updating](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#updating)
  */
 export type ToolCallUpdate = {
   /** The ID of the tool call being updated. */
@@ -130,10 +130,6 @@ export type ToolCallUpdate = {
   /** Update the human-readable title. */
   title?: string | null;
   /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
    * Update the programmatic name of the tool being invoked.
    *
    * This field is optional. Omitting it or sending `null` both mean that
@@ -153,7 +149,7 @@ export type ToolCallUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -167,7 +163,7 @@ export type ToolCallId = string;
  * Tool kinds help clients choose appropriate icons and optimize how they
  * display tool execution progress.
  *
- * See protocol docs: [Creating](https://agentclientprotocol.com/protocol/tool-calls#creating)
+ * See protocol docs: [Creating](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#creating)
  */
 export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other";
 
@@ -176,7 +172,7 @@ export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute
  *
  * Tool calls progress through different statuses during their lifecycle.
  *
- * See protocol docs: [Status](https://agentclientprotocol.com/protocol/tool-calls#status)
+ * See protocol docs: [Status](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#status)
  */
 export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -186,7 +182,7 @@ export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
  * Tool calls can produce different types of content including
  * standard content blocks (text, images) or file diffs.
  *
- * See protocol docs: [Content](https://agentclientprotocol.com/protocol/tool-calls#content)
+ * See protocol docs: [Content](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#content)
  */
 export type ToolCallContent = ({
   type: "content";
@@ -199,18 +195,15 @@ export type ToolCallContent = ({
 /**
  * Content blocks represent displayable information in the Agent Client Protocol.
  *
- * They provide a structured way to handle various types of user-facing content—whether
- * it's text from language models, images for analysis, or embedded resources for context.
- *
  * Content blocks appear in:
  * - User prompts sent via `session/prompt`
  * - Language model output streamed through `session/update` notifications
  * - Progress updates and results from tool calls
  *
- * This structure is compatible with the Model Context Protocol (MCP), enabling
- * agents to seamlessly forward content from MCP tool outputs without transformation.
+ * This structure is compatible with the Model Context Protocol (MCP), so agents can
+ * forward content from MCP tool outputs without transformation.
  *
- * See protocol docs: [Content](https://agentclientprotocol.com/protocol/content)
+ * See protocol docs: [Content](https://agentclientprotocol.com/protocol/v1/draft/content)
  */
 export type ContentBlock = ({
   type: "text";
@@ -237,7 +230,7 @@ export type Annotations = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -256,7 +249,7 @@ export type TextContent = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -276,7 +269,7 @@ export type ImageContent = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -294,7 +287,7 @@ export type AudioContent = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -320,7 +313,7 @@ export type ResourceLink = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -341,7 +334,7 @@ export type TextResourceContents = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -359,7 +352,7 @@ export type BlobResourceContents = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -375,7 +368,7 @@ export type EmbeddedResource = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -389,7 +382,7 @@ export type Content = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -399,12 +392,12 @@ export type Content = {
  *
  * Shows changes to files in a format suitable for display in the client UI.
  *
- * See protocol docs: [Content](https://agentclientprotocol.com/protocol/tool-calls#content)
+ * See protocol docs: [Content](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#content)
  */
 export type Diff = {
   /** The absolute file path being modified. */
   path: string;
-  /** The original content (None for new files). */
+  /** The original content (omitted or `null` for new files). */
   oldText?: string | null;
   /** The new content after modification. */
   newText: string;
@@ -413,7 +406,7 @@ export type Diff = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -426,7 +419,7 @@ export type TerminalId = string;
  *
  * The terminal must be added before calling `terminal/release`.
  *
- * See protocol docs: [Terminal](https://agentclientprotocol.com/protocol/terminals)
+ * See protocol docs: [Terminal](https://agentclientprotocol.com/protocol/v1/draft/terminals)
  */
 export type Terminal = {
   /** Identifier of the terminal instance to embed in the content stream. */
@@ -436,7 +429,7 @@ export type Terminal = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -447,19 +440,19 @@ export type Terminal = {
  * Enables clients to implement "follow-along" features that track
  * which files the agent is working with in real-time.
  *
- * See protocol docs: [Following the Agent](https://agentclientprotocol.com/protocol/tool-calls#following-the-agent)
+ * See protocol docs: [Following the Agent](https://agentclientprotocol.com/protocol/v1/draft/tool-calls#following-the-agent)
  */
 export type ToolCallLocation = {
   /** The absolute file path being accessed or modified. */
   path: string;
-  /** Optional line number within the file. */
+  /** Optional 1-based line number within the file. */
   line?: number | null;
   /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -477,7 +470,7 @@ export type PermissionOption = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -520,7 +513,7 @@ export type CreateTerminalRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -536,7 +529,7 @@ export type EnvVariable = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -552,7 +545,7 @@ export type TerminalOutputRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -568,7 +561,7 @@ export type ReleaseTerminalRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -584,7 +577,7 @@ export type WaitForTerminalExitRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -600,7 +593,7 @@ export type KillTerminalRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -622,7 +615,7 @@ export type CreateElicitationRequest = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 } & ({
@@ -643,7 +636,7 @@ export type CreateElicitationRequest = {
 /**
  * Session-scoped elicitation, optionally tied to a specific tool call.
  *
- * When `tool_call_id` is set, the elicitation is tied to a specific tool call.
+ * When `toolCallId` is set, the elicitation is tied to a specific tool call.
  * This is useful when an agent receives an elicitation from an MCP server
  * during a tool call and needs to redirect it to the user.
  */
@@ -704,7 +697,7 @@ export type ElicitationSchema = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -716,8 +709,8 @@ export type ElicitationSchemaType = "object";
  * Property schema for elicitation form fields.
  *
  * Each variant corresponds to a JSON Schema `"type"` value.
- * Single-select enums use the `String` variant with `enum` or `oneOf` set.
- * Multi-select enums use the `Array` variant.
+ * Single-select enums use `type: "string"` with `enum` or `oneOf` set.
+ * Multi-select enums use `type: "array"`.
  */
 export type ElicitationPropertySchema = ({
   type: "string";
@@ -762,7 +755,7 @@ export type EnumOption = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -835,7 +828,7 @@ export type StringPropertySchema = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -879,7 +872,7 @@ export type NumberPropertySchema = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -923,7 +916,7 @@ export type IntegerPropertySchema = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -955,7 +948,7 @@ export type BooleanPropertySchema = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -985,7 +978,7 @@ export type StringMultiSelectItems = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1001,7 +994,7 @@ export type TitledMultiSelectItems = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1047,7 +1040,7 @@ export type MultiSelectPropertySchema = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1074,44 +1067,13 @@ export type ElicitationUrlMode = {
  *
  * This capability is not part of the spec yet, and may be removed or changed at any point.
  *
- * Request parameters for `mcp/connect`.
- */
-export type ConnectMcpRequest = {
-  /** The ACP MCP server ID that was provided by the component declaring the MCP server. */
-  serverId: McpServerAcpId;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/**
- * **UNSTABLE**
- *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
- *
- * Unique identifier for an MCP server using the ACP transport.
- *
- * The value is opaque and generated by the ACP component providing the MCP server. It is
- * used by `mcp/connect` to route connection requests back to the component that declared the
- * server.
- */
-export type McpServerAcpId = string;
-
-/**
- * **UNSTABLE**
- *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
- *
  * Request parameters for `mcp/message`.
  */
 export type MessageMcpRequest = {
-  /** The MCP-over-ACP connection this message is sent on. */
-  connectionId: McpConnectionId;
+  /** The declared ACP MCP server receiving this request. */
+  serverId: McpServerAcpId;
+  /** The caller-generated identifier for the inner MCP request. */
+  requestId: McpRequestId;
   /** The inner MCP method name. */
   method: string;
   /**
@@ -1125,7 +1087,7 @@ export type MessageMcpRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1135,36 +1097,31 @@ export type MessageMcpRequest = {
  *
  * This capability is not part of the spec yet, and may be removed or changed at any point.
  *
- * A unique identifier for an active MCP-over-ACP connection.
+ * Unique identifier for an MCP server using the ACP transport.
+ *
+ * The value is opaque and generated by the ACP component providing the MCP server. It is
+ * used by `mcp/message` to route requests to the component that declared the server.
  */
-export type McpConnectionId = string;
+export type McpServerAcpId = string;
 
 /**
  * **UNSTABLE**
  *
  * This capability is not part of the spec yet, and may be removed or changed at any point.
  *
- * Request parameters for `mcp/disconnect`.
+ * Identifies an inner MCP request active against a server on this ACP connection.
+ *
+ * Generated by the caller and preserved unchanged by proxies. This is distinct
+ * from the outer ACP JSON-RPC request ID.
  */
-export type DisconnectMcpRequest = {
-  /** The MCP-over-ACP connection to close. */
-  connectionId: McpConnectionId;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
+export type McpRequestId = string;
 
 /**
  * Allows for sending an arbitrary request that is not part of the ACP spec.
  * Extension methods provide a way to add custom functionality while maintaining
  * protocol compatibility.
  *
- * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+ * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
  */
 export type ExtRequest = unknown;
 
@@ -1173,7 +1130,7 @@ export type AgentResponse = ({
   /** The id of the request this response answers. */
   id: RequestId;
   /** Method-specific response data. */
-  result: InitializeResponse | AuthenticateResponse | ListProvidersResponse | SetProviderResponse | DisableProviderResponse | LogoutResponse | NewSessionResponse | LoadSessionResponse | ListSessionsResponse | DeleteSessionResponse | ForkSessionResponse | ResumeSessionResponse | CloseSessionResponse | SetSessionModeResponse | SetSessionConfigOptionResponse | PromptResponse | StartNesResponse | SuggestNesResponse | CloseNesResponse | ExtResponse | MessageMcpResponse;
+  result: InitializeResponse | AuthenticateResponse | ListProvidersResponse | SetProviderResponse | DisableProviderResponse | LogoutResponse | AuthStatusResponse | NewSessionResponse | LoadSessionResponse | ListSessionsResponse | DeleteSessionResponse | ForkSessionResponse | ArchiveSessionResponse | UnarchiveSessionResponse | SessionStatusResponse | SetSessionTitleResponse | ResumeSessionResponse | CloseSessionResponse | SetSessionModeResponse | SetSessionConfigOptionResponse | PromptResponse | ExtResponse;
 }) | {
   /** The id of the request this response answers. */
   id: RequestId;
@@ -1186,7 +1143,7 @@ export type AgentResponse = ({
  *
  * Contains the negotiated protocol version and agent capabilities.
  *
- * See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/initialization)
+ * See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/v1/draft/initialization)
  */
 export type InitializeResponse = {
   /**
@@ -1211,7 +1168,7 @@ export type InitializeResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1230,7 +1187,7 @@ export type ProtocolVersion = number;
  * Advertised during initialization to inform the client about
  * available features and content types.
  *
- * See protocol docs: [Agent Capabilities](https://agentclientprotocol.com/protocol/initialization#agent-capabilities)
+ * See protocol docs: [Agent Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#agent-capabilities)
  */
 export type AgentCapabilities = {
   /** Whether the agent supports `session/load`. */
@@ -1255,30 +1212,11 @@ export type AgentCapabilities = {
    */
   providers?: ProvidersCapabilities | null;
   /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
-   * NES (Next Edit Suggestions) capabilities supported by the agent.
-   *
-   * Optional. Omitted or `null` both mean the agent does not advertise support
-   * for NES methods.
-   */
-  nes?: NesCapabilities | null;
-  /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
-   * The position encoding selected by the agent from the client's supported encodings.
-   */
-  positionEncoding?: PositionEncodingKind | null;
-  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1286,8 +1224,8 @@ export type AgentCapabilities = {
 /**
  * Prompt capabilities supported by the agent in `session/prompt` requests.
  *
- * Baseline agent functionality requires support for [`ContentBlock::Text`]
- * and [`ContentBlock::ResourceLink`] in prompt requests.
+ * Baseline agent functionality requires support for `text`
+ * and `resource_link` content blocks in prompt requests.
  *
  * Other variants must be explicitly opted in to.
  * Capabilities for different types of content in prompt requests.
@@ -1295,17 +1233,17 @@ export type AgentCapabilities = {
  * Indicates which content types beyond the baseline (text and resource links)
  * the agent can process.
  *
- * See protocol docs: [Prompt Capabilities](https://agentclientprotocol.com/protocol/initialization#prompt-capabilities)
+ * See protocol docs: [Prompt Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#prompt-capabilities)
  */
 export type PromptCapabilities = {
-  /** Agent supports [`ContentBlock::Image`]. */
+  /** Agent supports `image` content blocks. */
   image?: boolean;
-  /** Agent supports [`ContentBlock::Audio`]. */
+  /** Agent supports `audio` content blocks. */
   audio?: boolean;
   /**
    * Agent supports embedded context in `session/prompt` requests.
    *
-   * When enabled, the Client is allowed to include [`ContentBlock::Resource`]
+   * When enabled, the Client is allowed to include `resource` content blocks
    * in prompt requests for pieces of context that are referenced in the message.
    */
   embeddedContext?: boolean;
@@ -1314,23 +1252,23 @@ export type PromptCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
 
 /** MCP capabilities supported by the agent */
 export type McpCapabilities = {
-  /** Agent supports [`McpServer::Http`]. */
+  /** Agent supports `http` MCP servers. */
   http?: boolean;
-  /** Agent supports [`McpServer::Sse`]. */
+  /** Agent supports `sse` MCP servers. */
   sse?: boolean;
   /**
    * **UNSTABLE**
    *
    * This capability is not part of the spec yet, and may be removed or changed at any point.
    *
-   * Agent supports [`McpServer::Acp`].
+   * Agent supports `acp` MCP servers.
    */
   acp?: boolean;
   /**
@@ -1338,7 +1276,7 @@ export type McpCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1350,9 +1288,9 @@ export type McpCapabilities = {
  *
  * Optionally, they **MAY** support other session methods and notifications by specifying additional capabilities.
  *
- * Note: `session/load` is still handled by the top-level `load_session` capability. This will be unified in future versions of the protocol.
+ * Note: `session/load` is still handled by the top-level `loadSession` capability. This will be unified in future versions of the protocol.
  *
- * See protocol docs: [Session Capabilities](https://agentclientprotocol.com/protocol/initialization#session-capabilities)
+ * See protocol docs: [Session Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#session-capabilities)
  */
 export type SessionCapabilities = {
   /**
@@ -1382,6 +1320,13 @@ export type SessionCapabilities = {
    */
   additionalDirectories?: SessionAdditionalDirectoriesCapabilities | null;
   /**
+   * Whether the agent supports `systemPrompt` on session lifecycle requests.
+   *
+   * Optional. Omitted or `null` both mean the agent does not advertise support.
+   * Supplying `{}` means the agent supports `systemPrompt` in `append` mode.
+   */
+  systemPrompt?: SessionSystemPromptCapabilities | null;
+  /**
    * **UNSTABLE**
    *
    * This capability is not part of the spec yet, and may be removed or changed at any point.
@@ -1392,6 +1337,43 @@ export type SessionCapabilities = {
    * Supplying `{}` means the agent supports forking sessions.
    */
   fork?: SessionForkCapabilities | null;
+  /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Whether the agent supports `session/archive` and `session/unarchive`.
+   *
+   * Optional. Omitted or `null` both mean the agent does not advertise support.
+   * Supplying `{}` means the agent supports both methods, the `archived` filter on
+   * `session/list`, and `SessionInfo.archived`. Agents that advertise it MUST also advertise `sessionCapabilities.list`.
+   */
+  archive?: SessionArchiveCapabilities | null;
+  /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Whether the agent supports `session/status`.
+   *
+   * Optional. Omitted or `null` both mean the agent does not advertise support.
+   * Supplying `{}` means the agent supports checking session status.
+   */
+  status?: SessionStatusCapabilities | null;
+  /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Whether the agent supports `session/set_title`.
+   *
+   * Agents report titles through `session/list` and `session_info_update` without this
+   * capability. It only advertises that Clients can set titles.
+   *
+   * Optional. Omitted or `null` both mean the agent does not advertise support.
+   * Supplying `{}` means the agent supports setting session titles.
+   */
+  title?: SessionTitleCapabilities | null;
   /**
    * Whether the agent supports `session/resume`.
    *
@@ -1411,7 +1393,7 @@ export type SessionCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1427,7 +1409,7 @@ export type SessionListCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1443,7 +1425,7 @@ export type SessionDeleteCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1462,7 +1444,72 @@ export type SessionAdditionalDirectoriesCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * Capabilities for client-provided system prompts.
+ *
+ * Supplying `{}` means the agent supports `systemPrompt` on session lifecycle
+ * requests in `append` mode.
+ */
+export type SessionSystemPromptCapabilities = {
+  /**
+   * Delivery modes the agent supports in addition to `append`.
+   *
+   * Optional. Omitted or `null` both mean the agent supports only `append`.
+   */
+  mode?: SessionSystemPromptModeCapabilities | null;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * System prompt delivery modes the agent supports in addition to `append`.
+ *
+ * `append` has no entry because every agent advertising
+ * `sessionCapabilities.systemPrompt` supports it.
+ */
+export type SessionSystemPromptModeCapabilities = {
+  /**
+   * Whether the agent supports `override` mode.
+   *
+   * Optional. Omitted or `null` both mean the agent does not advertise support.
+   * Supplying `{}` means the agent supports replacing its built-in default
+   * instructions with the client-provided system prompt.
+   */
+  override?: SessionSystemPromptOverrideCapabilities | null;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * Capabilities for the `override` system prompt mode.
+ *
+ * Supplying `{}` means the agent supports replacing its built-in default
+ * instructions with the client-provided system prompt.
+ */
+export type SessionSystemPromptOverrideCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1482,7 +1529,69 @@ export type SessionForkCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Capabilities for `session/archive` and `session/unarchive`.
+ *
+ * Supplying `{}` means the agent supports both methods, the `archived` filter on
+ * `session/list`, and `SessionInfo.archived`.
+ */
+export type SessionArchiveCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Capabilities for the `session/status` method.
+ *
+ * Supplying `{}` means the agent supports checking session status.
+ */
+export type SessionStatusCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Capabilities for Client-set session titles.
+ *
+ * Supplying `{}` means the agent supports `session/set_title`. Agents report titles
+ * through `session/list` and `session_info_update` without this capability.
+ */
+export type SessionTitleCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1498,7 +1607,7 @@ export type SessionResumeCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1514,13 +1623,24 @@ export type SessionCloseCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
 
 /** Authentication-related capabilities supported by the agent. */
 export type AgentAuthCapabilities = {
+  /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Whether the agent supports the `auth/status` method.
+   *
+   * Optional. Omitted or `null` both mean the agent does not advertise support.
+   * Supplying `{}` means the agent supports the `auth/status` method.
+   */
+  status?: AuthStatusCapabilities | null;
   /**
    * Whether the agent supports the logout method.
    *
@@ -1533,7 +1653,27 @@ export type AgentAuthCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Auth status capabilities supported by the agent.
+ *
+ * Supplying `{}` means the agent supports the `auth/status` method.
+ */
+export type AuthStatusCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1549,7 +1689,7 @@ export type LogoutCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1569,236 +1709,10 @@ export type ProvidersCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
-
-/** NES capabilities advertised by the agent during initialization. */
-export type NesCapabilities = {
-  /** Events the agent wants to receive. */
-  events?: NesEventCapabilities | null;
-  /** Context the agent wants attached to each suggestion request. */
-  context?: NesContextCapabilities | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Event capabilities the agent can consume. */
-export type NesEventCapabilities = {
-  /** Document event capabilities. */
-  document?: NesDocumentEventCapabilities | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Document event capabilities the agent wants to receive. */
-export type NesDocumentEventCapabilities = {
-  /** Whether the agent wants `document/didOpen` events. */
-  didOpen?: NesDocumentDidOpenCapabilities | null;
-  /** Whether the agent wants `document/didChange` events, and the sync kind. */
-  didChange?: NesDocumentDidChangeCapabilities | null;
-  /** Whether the agent wants `document/didClose` events. */
-  didClose?: NesDocumentDidCloseCapabilities | null;
-  /** Whether the agent wants `document/didSave` events. */
-  didSave?: NesDocumentDidSaveCapabilities | null;
-  /** Whether the agent wants `document/didFocus` events. */
-  didFocus?: NesDocumentDidFocusCapabilities | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Marker for `document/didOpen` capability support. */
-export type NesDocumentDidOpenCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for `document/didChange` events. */
-export type NesDocumentDidChangeCapabilities = {
-  /** The sync kind the agent wants: `"full"` or `"incremental"`. */
-  syncKind: TextDocumentSyncKind;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** How the agent wants document changes delivered. */
-export type TextDocumentSyncKind = "full" | "incremental";
-
-/** Marker for `document/didClose` capability support. */
-export type NesDocumentDidCloseCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Marker for `document/didSave` capability support. */
-export type NesDocumentDidSaveCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Marker for `document/didFocus` capability support. */
-export type NesDocumentDidFocusCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Context capabilities the agent wants attached to each suggestion request. */
-export type NesContextCapabilities = {
-  /** Whether the agent wants recent files context. */
-  recentFiles?: NesRecentFilesCapabilities | null;
-  /** Whether the agent wants related snippets context. */
-  relatedSnippets?: NesRelatedSnippetsCapabilities | null;
-  /** Whether the agent wants edit history context. */
-  editHistory?: NesEditHistoryCapabilities | null;
-  /** Whether the agent wants user actions context. */
-  userActions?: NesUserActionsCapabilities | null;
-  /** Whether the agent wants open files context. */
-  openFiles?: NesOpenFilesCapabilities | null;
-  /** Whether the agent wants diagnostics context. */
-  diagnostics?: NesDiagnosticsCapabilities | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for recent files context. */
-export type NesRecentFilesCapabilities = {
-  /** Maximum number of recent files the agent can use. */
-  maxCount?: number | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for related snippets context. */
-export type NesRelatedSnippetsCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for edit history context. */
-export type NesEditHistoryCapabilities = {
-  /** Maximum number of edit history entries the agent can use. */
-  maxCount?: number | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for user actions context. */
-export type NesUserActionsCapabilities = {
-  /** Maximum number of user actions the agent can use. */
-  maxCount?: number | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for open files context. */
-export type NesOpenFilesCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Capabilities for diagnostics context. */
-export type NesDiagnosticsCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/**
- * The encoding used for character offsets in positions.
- *
- * Follows the same conventions as LSP 3.17. The default is UTF-16.
- */
-export type PositionEncodingKind = "utf-16" | "utf-32" | "utf-8";
 
 /**
  * Describes an available authentication method.
@@ -1819,7 +1733,7 @@ export type AuthMethodId = string;
  * The client runs the configured agent program as a separate interactive
  * process for the user to authenticate via a TUI. Agents MUST advertise this
  * method only when the client enabled its terminal authentication capability.
- * A zero exit status signals success; any other termination signals failure.
+ * A zero exit status signals success. Any other termination signals failure.
  * The client MUST NOT pass this method to `authenticate`.
  */
 export type AuthMethodTerminal = {
@@ -1827,7 +1741,7 @@ export type AuthMethodTerminal = {
   id: AuthMethodId;
   /** Human-readable name of the authentication method. */
   name: string;
-  /** Optional description providing more details about this authentication method. */
+  /** Optional human-readable description of this authentication method. */
   description?: string | null;
   /** Additional arguments to append to the configured agent invocation for terminal auth. */
   args?: Array<string>;
@@ -1841,7 +1755,7 @@ export type AuthMethodTerminal = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1856,14 +1770,14 @@ export type AuthMethodAgent = {
   id: AuthMethodId;
   /** Human-readable name of the authentication method. */
   name: string;
-  /** Optional description providing more details about this authentication method. */
+  /** Optional human-readable description of this authentication method. */
   description?: string | null;
   /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1876,11 +1790,11 @@ export type AuthMethodAgent = {
 export type Implementation = {
   /**
    * Intended for programmatic or logical use, but can be used as a display
-   * name fallback if title isn’t present.
+   * name fallback if title isn't present.
    */
   name: string;
   /**
-   * Intended for UI and end-user contexts — optimized to be human-readable
+   * Intended for UI and end-user contexts and optimized to be human-readable
    * and easily understood.
    *
    * If not provided, the name should be used for display.
@@ -1896,7 +1810,7 @@ export type Implementation = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1908,7 +1822,7 @@ export type AuthenticateResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1928,7 +1842,7 @@ export type ListProvidersResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -1960,7 +1874,7 @@ export type ProviderInfo = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2005,7 +1919,7 @@ export type ProviderCurrentConfig = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2023,7 +1937,7 @@ export type SetProviderResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2041,7 +1955,7 @@ export type DisableProviderResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2053,7 +1967,103 @@ export type LogoutResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Response to the `auth/status` method.
+ */
+export type AuthStatusResponse = {
+  /**
+   * Whether the agent can start sessions without the user signing in first.
+   *
+   * This is the only field clients should act on. Clients MUST treat values they
+   * do not recognize as `unknown`.
+   */
+  state: AuthState;
+  /**
+   * The accounts the agent has configured, for display.
+   *
+   * Optional. Omitted and empty are equivalent and mean no accounts are reported.
+   * Agents that hold credentials for several providers or accounts SHOULD list each
+   * of them and mark the ones in effect with `active`.
+   */
+  accounts?: Array<AuthAccount>;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * The agent's overall authentication state.
+ */
+export type AuthState = "authenticated" | "unauthenticated" | "not_required" | "unknown" | string;
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * An account or credential the agent has configured, such as a signed-in user
+ * account or an API key.
+ *
+ * All fields are display information only. Clients MUST NOT use them as stable
+ * account identifiers, and SHOULD NOT log them or send them elsewhere, such as to
+ * telemetry.
+ */
+export type AuthAccount = {
+  /**
+   * Human-readable name for the account, suitable for display on its own,
+   * for example `Claude Max`, `OpenAI API key`, or `Vertex AI`.
+   */
+  label: string;
+  /**
+   * Whether the agent currently uses this account by default.
+   *
+   * Several accounts MAY be active, for example one per provider.
+   *
+   * Optional. Omitted and `null` are equivalent and mean the agent does not indicate whether this account is in effect.
+   */
+  active?: boolean | null;
+  /**
+   * Display name of the user, such as a username or full name.
+   *
+   * Optional. Omitted and `null` are equivalent and mean no name is reported.
+   */
+  name?: string | null;
+  /**
+   * Email address of the user.
+   *
+   * Optional. Omitted and `null` are equivalent and mean no email is reported.
+   */
+  email?: string | null;
+  /**
+   * Display name of the organization, team, or workspace the account is using.
+   *
+   * Optional. Omitted and `null` are equivalent and mean no organization is reported.
+   */
+  organization?: string | null;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2061,7 +2071,7 @@ export type LogoutResponse = {
 /**
  * Response from creating a new session.
  *
- * See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/session-setup#creating-a-session)
+ * See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/v1/draft/session-setup#creating-a-session)
  */
 export type NewSessionResponse = {
   /**
@@ -2073,7 +2083,7 @@ export type NewSessionResponse = {
   /**
    * Initial mode state if supported by the Agent
    *
-   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
    */
   modes?: SessionModeState | null;
   /** Initial session configuration options if supported by the Agent. */
@@ -2083,7 +2093,7 @@ export type NewSessionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2099,7 +2109,7 @@ export type SessionModeState = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2110,7 +2120,7 @@ export type SessionModeId = string;
 /**
  * A mode the agent can operate in.
  *
- * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+ * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
  */
 export type SessionMode = {
   /** Stable identifier used to refer to this protocol object in later messages. */
@@ -2124,7 +2134,7 @@ export type SessionMode = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2144,7 +2154,7 @@ export type SessionConfigOption = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 } & ({
@@ -2188,7 +2198,7 @@ export type SessionConfigSelectOption = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2206,7 +2216,7 @@ export type SessionConfigSelectGroup = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2233,7 +2243,7 @@ export type LoadSessionResponse = {
   /**
    * Initial mode state if supported by the Agent
    *
-   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
    */
   modes?: SessionModeState | null;
   /** Initial session configuration options if supported by the Agent. */
@@ -2243,7 +2253,7 @@ export type LoadSessionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2262,7 +2272,7 @@ export type ListSessionsResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2286,11 +2296,22 @@ export type SessionInfo = {
   /** ISO 8601 timestamp of last activity */
   updatedAt?: string | null;
   /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Whether the session is archived.
+   *
+   * Optional. Omitted and `null` are equivalent and mean the archive state is not reported.
+   * Agents that advertise the `sessionCapabilities.archive` capability MUST include it on every listed session.
+   */
+  archived?: boolean | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2302,7 +2323,7 @@ export type DeleteSessionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2320,7 +2341,7 @@ export type ForkSessionResponse = {
   /**
    * Initial mode state if supported by the Agent
    *
-   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
    */
   modes?: SessionModeState | null;
   /** Initial session configuration options if supported by the Agent. */
@@ -2330,7 +2351,104 @@ export type ForkSessionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Response from archiving a session.
+ */
+export type ArchiveSessionResponse = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Response from unarchiving a session.
+ */
+export type UnarchiveSessionResponse = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Response from checking the status of a session.
+ *
+ * The result is a snapshot. A session reported `open` may be closed or evicted before
+ * the Client's next request.
+ */
+export type SessionStatusResponse = {
+  /**
+   * Whether the Agent has the session in memory.
+   *
+   * Required. Clients MUST treat a value they do not recognize as `saved`.
+   */
+  status: SessionStatus;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Whether the Agent has a session in memory, as reported by `session/status`.
+ */
+export type SessionStatus = "open" | "saved" | string;
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Response from setting the title of a session.
+ */
+export type SetSessionTitleResponse = {
+  /**
+   * The title the Agent stored.
+   *
+   * This differs from the requested title if the Agent normalized it. Clients SHOULD
+   * display this value rather than the one they sent.
+   */
+  title: string;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2340,7 +2458,7 @@ export type ResumeSessionResponse = {
   /**
    * Initial mode state if supported by the Agent
    *
-   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+   * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
    */
   modes?: SessionModeState | null;
   /** Initial session configuration options if supported by the Agent. */
@@ -2350,7 +2468,7 @@ export type ResumeSessionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2362,7 +2480,7 @@ export type CloseSessionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2374,7 +2492,7 @@ export type SetSessionModeResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2388,7 +2506,7 @@ export type SetSessionConfigOptionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2396,7 +2514,7 @@ export type SetSessionConfigOptionResponse = {
 /**
  * Response from processing a user prompt.
  *
- * See protocol docs: [Check for Completion](https://agentclientprotocol.com/protocol/prompt-turn#4-check-for-completion)
+ * See protocol docs: [Check for Completion](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#4-check-for-completion)
  */
 export type PromptResponse = {
   /** Indicates why the agent stopped processing the turn. */
@@ -2414,7 +2532,7 @@ export type PromptResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2422,7 +2540,7 @@ export type PromptResponse = {
 /**
  * Reasons why an agent stops processing a prompt turn.
  *
- * See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/prompt-turn#stop-reasons)
+ * See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#stop-reasons)
  */
 export type StopReason = "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled";
 
@@ -2451,216 +2569,19 @@ export type Usage = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Response to `nes/start`. */
-export type StartNesResponse = {
-  /** The session ID for the newly started NES session. */
-  sessionId: SessionId;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Response to `nes/suggest`. */
-export type SuggestNesResponse = {
-  /** The list of suggestions. */
-  suggestions: Array<NesSuggestion>;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A suggestion returned by the agent. */
-export type NesSuggestion = ({
-  kind: "edit";
-} & NesEditSuggestion) | ({
-  kind: "jump";
-} & NesJumpSuggestion) | ({
-  kind: "rename";
-} & NesRenameSuggestion) | ({
-  kind: "searchAndReplace";
-} & NesSearchAndReplaceSuggestion);
-
-/** Unique identifier for a next edit suggestion. */
-export type NesSuggestionId = string;
-
-/** A text edit within a suggestion. */
-export type NesTextEdit = {
-  /** The range to replace. */
-  range: Range;
-  /** The replacement text. */
-  newText: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A range in a text document, expressed as start and end positions. */
-export type Range = {
-  /** The start position (inclusive). */
-  start: Position;
-  /** The end position (exclusive). */
-  end: Position;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
 
 /**
- * A zero-based position in a text document.
- *
- * The meaning of `character` depends on the negotiated position encoding.
- */
-export type Position = {
-  /** Zero-based line number. */
-  line: number;
-  /** Zero-based character offset (encoding-dependent). */
-  character: number;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A text edit suggestion. */
-export type NesEditSuggestion = {
-  /** Unique identifier for accept/reject tracking. */
-  id: NesSuggestionId;
-  /** The URI of the file to edit. */
-  uri: string;
-  /** The text edits to apply. */
-  edits: Array<NesTextEdit>;
-  /** Optional suggested cursor position after applying edits. */
-  cursorPosition?: Position | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A jump-to-location suggestion. */
-export type NesJumpSuggestion = {
-  /** Unique identifier for accept/reject tracking. */
-  id: NesSuggestionId;
-  /** The file to navigate to. */
-  uri: string;
-  /** The target position within the file. */
-  position: Position;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A rename symbol suggestion. */
-export type NesRenameSuggestion = {
-  /** Unique identifier for accept/reject tracking. */
-  id: NesSuggestionId;
-  /** The file URI containing the symbol. */
-  uri: string;
-  /** The position of the symbol to rename. */
-  position: Position;
-  /** The new name for the symbol. */
-  newName: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A search-and-replace suggestion. */
-export type NesSearchAndReplaceSuggestion = {
-  /** Unique identifier for accept/reject tracking. */
-  id: NesSuggestionId;
-  /** The file URI to search within. */
-  uri: string;
-  /** The text or pattern to find. */
-  search: string;
-  /** The replacement text. */
-  replace: string;
-  /** Whether `search` is a regular expression. Defaults to `false`. */
-  isRegex?: boolean | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Response from closing an NES session. */
-export type CloseNesResponse = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/**
- * Allows for sending an arbitrary response to an [`ExtRequest`] that is not part of the ACP spec.
+ * Allows for sending an arbitrary response to an extension request that is not part of the ACP spec.
  * Extension methods provide a way to add custom functionality while maintaining
  * protocol compatibility.
  *
- * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+ * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
  */
 export type ExtResponse = unknown;
-
-/**
- * **UNSTABLE**
- *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
- *
- * Response to `mcp/message`.
- *
- * This is the inner MCP response result payload. Any JSON value is valid.
- */
-export type MessageMcpResponse = unknown;
 
 /**
  * JSON-RPC error object.
@@ -2691,8 +2612,9 @@ export type Error = {
 /**
  * Predefined error codes for common JSON-RPC and ACP-specific errors.
  *
- * These codes follow the JSON-RPC 2.0 specification for standard errors
- * and use the reserved range (-32000 to -32099) for protocol-specific errors.
+ * Standard errors use the JSON-RPC 2.0 codes. ACP-specific errors use the JSON-RPC
+ * server-error range (-32000 to -32099), and request cancellation uses -32800 from the
+ * range LSP reserves (-32899 to -32800).
  */
 export type ErrorCode = -32700 | -32600 | -32601 | -32602 | -32603 | -32800 | -32000 | -32002 | number;
 
@@ -2701,7 +2623,7 @@ export type AgentNotification = {
   /** The notification method name. */
   method: string;
   /** Method-specific notification parameters. */
-  params?: (SessionNotification | CompleteElicitationNotification | MessageMcpNotification | ExtNotification) | null;
+  params?: (SessionNotification | CompleteElicitationNotification | AuthStatusUpdateNotification | ExtNotification) | null;
 };
 
 /**
@@ -2709,7 +2631,7 @@ export type AgentNotification = {
  *
  * Used to stream real-time progress and results during prompt processing.
  *
- * See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/prompt-turn#3-agent-reports-output)
+ * See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#3-agent-reports-output)
  */
 export type SessionNotification = {
   /** The ID of the session this update pertains to. */
@@ -2721,7 +2643,7 @@ export type SessionNotification = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2731,7 +2653,7 @@ export type SessionNotification = {
  *
  * These updates provide real-time feedback about the agent's progress.
  *
- * See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/prompt-turn#3-agent-reports-output)
+ * See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#3-agent-reports-output)
  */
 export type SessionUpdate = ({
   sessionUpdate: "user_message_chunk";
@@ -2760,10 +2682,18 @@ export type SessionUpdate = ({
 } & SessionInfoUpdate) | ({
   sessionUpdate: "usage_update";
 } & UsageUpdate) | ({
+  sessionUpdate: "notice";
+} & Notice) | ({
   sessionUpdate: "compaction_update";
 } & CompactionUpdate) | ({
   sessionUpdate: "compaction_summary_chunk";
-} & CompactionSummaryChunk);
+} & CompactionSummaryChunk) | ({
+  sessionUpdate: "subagent_update";
+} & SubagentUpdate) | ({
+  sessionUpdate: "session_message";
+} & SessionMessage) | ({
+  sessionUpdate: "session_message_chunk";
+} & SessionMessageChunk);
 
 /** Unique identifier for a message within a session. */
 export type MessageId = string;
@@ -2784,7 +2714,7 @@ export type ContentChunk = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2795,7 +2725,7 @@ export type ContentChunk = {
  * Tool calls are actions that the agent executes on behalf of the language model,
  * such as reading files, executing code, or fetching data from external sources.
  *
- * See protocol docs: [Tool Calls](https://agentclientprotocol.com/protocol/tool-calls)
+ * See protocol docs: [Tool Calls](https://agentclientprotocol.com/protocol/v1/draft/tool-calls)
  */
 export type ToolCall = {
   /** Unique identifier for this tool call within the session. */
@@ -2803,10 +2733,6 @@ export type ToolCall = {
   /** Human-readable title describing what the tool is doing. */
   title: string;
   /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
    * Programmatic name of the tool being invoked.
    *
    * This field is optional. Omitting it or sending `null` both mean that no
@@ -2836,7 +2762,7 @@ export type ToolCall = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2846,7 +2772,7 @@ export type ToolCall = {
  *
  * Represents a task or goal that the assistant intends to accomplish
  * as part of fulfilling the user's request.
- * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
+ * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v1/draft/agent-plan#plan-entries)
  */
 export type PlanEntry = {
   /** Human-readable description of what this task aims to accomplish. */
@@ -2863,7 +2789,7 @@ export type PlanEntry = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2873,7 +2799,7 @@ export type PlanEntry = {
  *
  * Used to indicate the relative importance or urgency of different
  * tasks in the execution plan.
- * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
+ * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v1/draft/agent-plan#plan-entries)
  */
 export type PlanEntryPriority = "high" | "medium" | "low";
 
@@ -2881,7 +2807,7 @@ export type PlanEntryPriority = "high" | "medium" | "low";
  * Status of a plan entry in the execution flow.
  *
  * Tracks the lifecycle of each task from planning through completion.
- * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
+ * See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v1/draft/agent-plan#plan-entries)
  */
 export type PlanEntryStatus = "pending" | "in_progress" | "completed";
 
@@ -2892,7 +2818,7 @@ export type PlanEntryStatus = "pending" | "in_progress" | "completed";
  * Agents report plans to clients to provide visibility into their execution strategy.
  * Plans can evolve during execution as the agent discovers new requirements or completes tasks.
  *
- * See protocol docs: [Agent Plan](https://agentclientprotocol.com/protocol/agent-plan)
+ * See protocol docs: [Agent Plan](https://agentclientprotocol.com/protocol/v1/draft/agent-plan)
  */
 export type Plan = {
   /**
@@ -2907,7 +2833,7 @@ export type Plan = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2958,7 +2884,7 @@ export type PlanItems = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -2980,7 +2906,7 @@ export type PlanFile = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3002,7 +2928,7 @@ export type PlanMarkdown = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3022,7 +2948,7 @@ export type PlanUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3042,7 +2968,7 @@ export type PlanRemoved = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3060,7 +2986,7 @@ export type AvailableCommand = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3077,7 +3003,7 @@ export type UnstructuredCommandInput = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3091,7 +3017,7 @@ export type AvailableCommandsUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3099,7 +3025,7 @@ export type AvailableCommandsUpdate = {
 /**
  * The current mode of the session has changed
  *
- * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
+ * See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/v1/draft/session-modes)
  */
 export type CurrentModeUpdate = {
   /** The ID of the current mode */
@@ -3109,7 +3035,7 @@ export type CurrentModeUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3123,7 +3049,7 @@ export type ConfigOptionUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3132,7 +3058,7 @@ export type ConfigOptionUpdate = {
  * Update to session metadata. All fields are optional to support partial updates.
  *
  * Agents send this notification to update session information like title or custom metadata.
- * This allows clients to display dynamic session names and track session state changes.
+ * Clients can use it to keep session titles and state current.
  */
 export type SessionInfoUpdate = {
   /** Human-readable title for the session. Set to null to clear. */
@@ -3144,7 +3070,7 @@ export type SessionInfoUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3153,14 +3079,17 @@ export type SessionInfoUpdate = {
 export type Cost = {
   /** Total cumulative cost for session. */
   amount: number;
-  /** ISO 4217 currency code (e.g., "USD", "EUR"). */
+  /**
+   * Unit of `amount`: an ISO 4217 currency code (e.g., "USD", "EUR") for money, or another
+   * unit such as "credits".
+   */
   currency: string;
   /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3178,7 +3107,109 @@ export type UsageUpdate = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/** Severity hint for a session notice. */
+export type NoticeSeverity = "info" | "warning" | "error" | string;
+
+/**
+ * Fire-and-forget information for the user.
+ *
+ * Notices are live events rather than session history. Agents must not rely on
+ * a notice being received, displayed, or seen by the user.
+ * Agents MUST only send notices when the Client advertised
+ * the `session.notices` Client capability. Otherwise, Agents may use an agent
+ * message when the information should still be surfaced to the user.
+ *
+ * See RFD: [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
+ */
+export type Notice = {
+  /** Presentation severity hint. */
+  severity: NoticeSeverity;
+  /** Required non-empty plain-text title that can stand alone. */
+  title: string;
+  /**
+   * Optional plain-text detail or guidance.
+   *
+   * Omitted and `null` are equivalent and mean no description was supplied.
+   */
+  description?: string | null;
+  /**
+   * Metadata scoped to this notice.
+   *
+   * Omitted and `null` are equivalent and mean no metadata was supplied.
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/** Unique identifier for a context compaction within a session. */
+export type CompactionId = string;
+
+/** Lifecycle state of a context compaction. */
+export type CompactionStatus = "in_progress" | "completed" | "failed" | "cancelled" | string;
+
+/**
+ * A context compaction upsert. The first notification fixes the compaction's
+ * timeline position. Later updates with the same ID patch that entity in place.
+ * Agents MUST only send this update when the Client advertised
+ * the `session.compaction` Client capability.
+ *
+ * `summary`, `error`, and `_meta` have patch semantics: omission leaves the
+ * stored value unchanged, `null` clears it, and a concrete value replaces it.
+ * `summary: []` also clears the summary.
+ */
+export type CompactionUpdate = {
+  /** The Agent-owned ID of this compaction, unique within the session. */
+  compactionId: CompactionId;
+  /** Current lifecycle status. */
+  status: CompactionStatus;
+  /** Complete replacement user-displayable summary content for the compaction. */
+  summary?: Array<ContentBlock> | null;
+  /** Human-readable error details for the compaction. */
+  error?: string | null;
+  /** Extensible metadata patch for this compaction. */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * A content block appended to a compaction's summary. A first-seen ID creates
+ * an in-progress compaction. Chunks append in receive order.
+ * Agents MUST only send this update when the Client advertised
+ * the `session.compaction` Client capability.
+ */
+export type CompactionSummaryChunk = {
+  /** ID of the compaction whose summary receives this content. */
+  compactionId: CompactionId;
+  /** One content block to append. */
+  content: ContentBlock;
+  /** Metadata scoped to this chunk. Omission and `null` both mean absent. */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Client-initiated session mutations permitted for a specific subagent session.
+ *
+ * A mutation requires an explicit per-child capability. Support for the method
+ * on ordinary sessions does not grant support on a child.
+ */
+export type SubagentSessionCapabilities = {
+  /**
+   * Permits the client to cancel this child's current work without ending
+   * the session. Omitted or `null` means unsupported. An object (including
+   * `{}`) means supported.
+   */
+  cancel?: SessionCancelCapabilities | null;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3188,44 +3219,18 @@ export type UsageUpdate = {
  *
  * This capability is not part of the spec yet, and may be removed or changed at any point.
  *
- * Unique identifier for a context compaction within a session.
+ * Capability to cancel work in a subagent session without ending that session.
+ *
+ * Supplying `{}` advertises support. An omitted or `null` `cancel` does not.
  */
-export type CompactionId = string;
-
-/**
- * **UNSTABLE**
- *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
- *
- * Lifecycle state of a context compaction.
- */
-export type CompactionStatus = "in_progress" | "completed" | "failed" | "cancelled" | string;
-
-/**
- * **UNSTABLE**
- *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
- *
- * A context compaction upsert. The first update fixes the compaction's
- * timeline position. Later updates with the same ID patch that entity in place.
- * Agents MUST only send this update when the Client advertised
- * [`ClientSessionCapabilities::compaction`].
- *
- * `summary`, `error`, and `_meta` have patch semantics: omission leaves the
- * stored value unchanged, `null` clears it, and a concrete value replaces it.
- * `summary: []` also clears the retained summary. A non-empty summary is only
- * valid with `completed`; `error` is only valid with `failed`.
- */
-export type CompactionUpdate = {
-  /** The Agent-owned ID of this compaction, unique within the session. */
-  compactionId: CompactionId;
-  /** Current lifecycle status. */
-  status: CompactionStatus;
-  /** Complete replacement user-displayable summary retained by the compaction. */
-  summary?: Array<ContentBlock> | null;
-  /** Human-readable description of why the compaction failed. */
-  error?: string | null;
-  /** Extensible metadata patch for this compaction. */
+export type SessionCancelCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
   _meta?: Record<string, unknown> | null;
 };
 
@@ -3234,17 +3239,295 @@ export type CompactionUpdate = {
  *
  * This capability is not part of the spec yet, and may be removed or changed at any point.
  *
- * A content block appended to the retained summary of an in-progress
- * compaction. Agents send chunks only after an `in_progress` update and before
- * the terminal update for the same ID. Agents MUST only send this update when
- * the Client advertised [`ClientSessionCapabilities::compaction`].
+ * Current foreground-work state of a reusable child session.
+ *
+ * Each update is a whole-object snapshot. Idle does not terminate the child.
+ * The parent can message it again, transitioning it back to running.
+ * Background activity may still emit other session updates while idle.
  */
-export type CompactionSummaryChunk = {
-  /** ID of the compaction whose summary receives this content. */
-  compactionId: CompactionId;
-  /** One content block to append. */
+export type StateUpdate = ({
+  state: "running";
+} & RunningStateUpdate) | ({
+  state: "idle";
+} & IdleStateUpdate) | ({
+  state: "requires_action";
+} & RequiresActionStateUpdate) | ({
+  state: "unknown";
+} & UnknownStateUpdate) | {
+  /** Unrecognized state discriminator. */
+  state: string;
+};
+
+/** Foreground work is in progress. */
+export type RunningStateUpdate = {
+  /**
+   * The _meta property is reserved by ACP for additional metadata.
+   * Implementations MUST NOT make assumptions about values at these keys.
+   * Optional. Omitted and `null` mean no metadata for this state snapshot.
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Details of a failure that ended a child's foreground work.
+ */
+export type ErrorStopReason = {
+  /**
+   * The failure, as a JSON-RPC error object.
+   *
+   * Optional. Omitted or `null` both mean the agent is not reporting failure details.
+   * Agents SHOULD include it.
+   */
+  error?: Error | null;
+};
+
+/**
+ * The child is ready to process another prompt.
+ *
+ * An omitted, `null`, or malformed `stopReason` means not reported.
+ */
+export type IdleStateUpdate = {
+  /**
+   * **UNSTABLE** Token usage for completed foreground work.
+   *
+   * Optional. Omitted or `null` means not reported.
+   */
+  usage?: Usage | null;
+  /**
+   * The _meta property is reserved by ACP for additional metadata.
+   * Implementations MUST NOT make assumptions about values at these keys.
+   * Optional. Omitted and `null` mean no metadata for this state snapshot.
+   */
+  _meta?: Record<string, unknown> | null;
+  /**
+   * Why foreground work stopped. The value selects one of this type's variants, which may add fields of their own.
+   *
+   * Optional. Omitted or `null` both mean the agent is not reporting a stop reason; a malformed value is treated the same way.
+   *
+   * See protocol docs: [Current work state](https://agentclientprotocol.com/rfds/subagents#current-work-state)
+   */
+  stopReason?: string | null;
+} & ({
+  stopReason: "end_turn";
+} | {
+  stopReason: "max_tokens";
+} | {
+  stopReason: "max_turn_requests";
+} | {
+  stopReason: "refusal";
+} | {
+  stopReason: "cancelled";
+} | ({
+  stopReason: "error";
+} & ErrorStopReason) | {
+  /** Unrecognized stop reason. */
+  stopReason: string;
+} | {
+  stopReason?: null;
+});
+
+/** Foreground work is blocked on user action. */
+export type RequiresActionStateUpdate = {
+  /**
+   * The _meta property is reserved by ACP for additional metadata.
+   * Implementations MUST NOT make assumptions about values at these keys.
+   * Optional. Omitted and `null` mean no metadata for this state snapshot.
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * The Agent cannot currently determine foreground activity.
+ *
+ * Report this when activity becomes unobservable, not merely because the child
+ * has been quiet. The Client MUST stop presenting the previous state as confirmed
+ * current activity, but may retain it as last known. A later state replaces this
+ * snapshot normally.
+ *
+ * This is not a task outcome or session closure. It does not cancel work, resolve
+ * pending requests, or revoke capabilities. Capabilities are updated separately.
+ */
+export type UnknownStateUpdate = {
+  /**
+   * The _meta property is reserved by ACP for additional metadata.
+   * Implementations MUST NOT make assumptions about values at these keys.
+   * Optional. Omitted and `null` mean no metadata for this state snapshot.
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Notification that the enclosing parent session created and owns a child session.
+ *
+ * Later updates modify the existing association's metadata, not its ownership.
+ *
+ * Sent on the immediate parent session. The first update for an unknown
+ * `sessionId` announces the child and MUST be sent
+ * before any live child traffic or live message naming the child as sender
+ * or recipient. Parents may message and reuse an announced child across
+ * multiple operations.
+ * Child events are delivered automatically on the same connection. No child
+ * load, resume, or subscription is needed.
+ *
+ * Only the subagent session ID is required. Omitted patch fields keep their
+ * previous values. `null` clears them. Clearing capabilities disables child
+ * mutations. Clearing state leaves current activity unset/unconfirmed: it does
+ * not imply idle, stop work, or create an `unknown` state snapshot. A concrete
+ * state replaces the entire previous state object, not the session.
+ * The title and description provide the parent's display metadata for the
+ * child. They do not replace the content of individual messages or operations.
+ * `cwd` and `additionalDirectories` report where the Agent placed the child.
+ * While unset, each inherits the immediate parent's effective value.
+ */
+export type SubagentUpdate = {
+  /** The opaque session ID identifying the child in all ACP messages. */
+  sessionId: SessionId;
+  /**
+   * The parent's human-readable display title for this child. It need not be unique.
+   *
+   * Omitted means unchanged. `null` clears it. If unset, the Client chooses
+   * a fallback presentation.
+   */
+  title?: string | null;
+  /**
+   * The parent's human-readable description of the child's role or purpose.
+   *
+   * Omitted means unchanged. `null` clears it. If unset, the Client chooses
+   * a fallback presentation. This is current display metadata, not the
+   * history of instructions sent to the child.
+   */
+  description?: string | null;
+  /**
+   * Client-initiated session mutations permitted for this subagent session.
+   *
+   * Omitted means unchanged. `null` clears the capability set and disables
+   * child mutations. If never supplied, no session mutations are permitted.
+   * Read-only operations retain their normal protocol semantics and capability
+   * requirements. A concrete object replaces the whole capability set.
+   */
+  capabilities?: SubagentSessionCapabilities | null;
+  /**
+   * Current state snapshot for the child session.
+   *
+   * Omitted means unchanged. `null` clears the current activity without
+   * asserting idle or sending an `unknown` snapshot. A concrete state
+   * replaces the previous state object wholesale. If never supplied, the
+   * current activity is unset/unconfirmed.
+   */
+  state?: StateUpdate | null;
+  /**
+   * The child's working directory. Must be an absolute path.
+   *
+   * Optional and nullable. Omitted means unchanged. `null` clears the
+   * reported value. While unset, the child inherits its immediate parent's
+   * effective working directory. Clients use this value for the child's
+   * root set and as the default terminal working directory.
+   */
+  cwd?: string | null;
+  /**
+   * Additional workspace roots for the child. Each path must be absolute.
+   *
+   * Optional and nullable. Omitted means unchanged. `null` clears the
+   * reported value. While unset, the child inherits its immediate parent's
+   * effective additional directories, independently of `cwd`. A concrete
+   * array replaces the whole list. `[]` reports no additional directories.
+   * Clients use these values for the child's root set.
+   */
+  additionalDirectories?: Array<string> | null;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   * Omitted means unchanged. `null` removes the metadata.
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * An upsert for an inter-session message.
+ */
+export type SessionMessage = {
+  /** Identifier of this message within the enclosing session's transcript. */
+  messageId: MessageId;
+  /**
+   * The sending session.
+   *
+   * Omitted leaves the stored value unchanged. `null` clears it. A value replaces it.
+   */
+  senderSessionId?: SessionId | null;
+  /**
+   * The receiving session.
+   *
+   * Omitted leaves the stored value unchanged. `null` clears it. A value replaces it.
+   */
+  recipientSessionId?: SessionId | null;
+  /**
+   * On an incoming view, the `messageId` of the same message's outgoing view in the
+   * sender's transcript.
+   *
+   * Omitted leaves the stored value unchanged. `null` clears it. A value replaces it. It can arrive
+   * after the message starts streaming.
+   */
+  senderMessageId?: MessageId | null;
+  /**
+   * On an outgoing view, the `messageId` of the same message's incoming view in the
+   * recipient's transcript.
+   *
+   * Omitted leaves the stored value unchanged. `null` clears it. A value replaces it. It can arrive
+   * after the message starts streaming.
+   */
+  recipientMessageId?: MessageId | null;
+  /**
+   * Omitted leaves content unchanged. `null` or `[]` clears it.
+   * A non-empty array replaces all content.
+   */
+  content?: Array<ContentBlock> | null;
+  /**
+   * Omitted leaves metadata unchanged. `null` removes it.
+   *
+   * Implementations MUST NOT make assumptions about values in `_meta`.
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * A streamed content block of an inter-session message.
+ *
+ * A chunk carries only content. The message's participants and references come from
+ * `session_message` upserts, which can arrive before, between, or after its chunks.
+ */
+export type SessionMessageChunk = {
+  /** Identifier of this message within the enclosing session's transcript. */
+  messageId: MessageId;
+  /** A single content block appended to the message. */
   content: ContentBlock;
-  /** Metadata scoped to this chunk. Omission and `null` both mean absent. */
+  /**
+   * Optional and nullable chunk-scoped metadata. Omitted or `null` means none.
+   *
+   * Implementations MUST NOT make assumptions about values in `_meta`.
+   */
   _meta?: Record<string, unknown> | null;
 };
 
@@ -3259,7 +3542,7 @@ export type CompleteElicitationNotification = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3269,38 +3552,44 @@ export type CompleteElicitationNotification = {
  *
  * This capability is not part of the spec yet, and may be removed or changed at any point.
  *
- * Notification parameters for `mcp/message`.
+ * Notification sent by the agent when its authentication status changes.
  *
- * This is used when the wrapped MCP message is a notification and the outer JSON-RPC
- * envelope has no `id`.
+ * Carries the same fields as the `auth/status` response. Agents that advertise the
+ * `auth.status` capability MAY send it at any time after `initialize`, and SHOULD only
+ * send it when the reported status differs from the last one sent on the connection.
  */
-export type MessageMcpNotification = {
-  /** The MCP-over-ACP connection this message is sent on. */
-  connectionId: McpConnectionId;
-  /** The inner MCP method name. */
-  method: string;
+export type AuthStatusUpdateNotification = {
   /**
-   * Optional inner MCP params.
+   * Whether the agent can start sessions without the user signing in first.
    *
-   * If omitted or set to `null`, the inner MCP message has no params.
+   * This is the only field clients should act on. Clients MUST treat values they
+   * do not recognize as `unknown`.
    */
-  params?: Record<string, unknown> | null;
+  state: AuthState;
+  /**
+   * The accounts the agent has configured, for display.
+   *
+   * Optional. Omitted and empty are equivalent and mean no accounts are reported.
+   * Agents that hold credentials for several providers or accounts SHOULD list each
+   * of them and mark the ones in effect with `active`.
+   */
+  accounts?: Array<AuthAccount>;
   /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
 
 /**
- * Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
+ * Allows either side to send an arbitrary notification that is not part of the ACP spec.
  * Extension notifications provide a way to send one-way messages for custom functionality
  * while maintaining protocol compatibility.
  *
- * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+ * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
  */
 export type ExtNotification = unknown;
 
@@ -3311,7 +3600,7 @@ export type ClientRequest = {
   /** The method name to invoke. */
   method: string;
   /** Method-specific request parameters. */
-  params?: (InitializeRequest | AuthenticateRequest | ListProvidersRequest | SetProviderRequest | DisableProviderRequest | LogoutRequest | NewSessionRequest | LoadSessionRequest | ListSessionsRequest | DeleteSessionRequest | ForkSessionRequest | ResumeSessionRequest | CloseSessionRequest | SetSessionModeRequest | SetSessionConfigOptionRequest | PromptRequest | StartNesRequest | SuggestNesRequest | CloseNesRequest | MessageMcpRequest | ExtRequest) | null;
+  params?: (InitializeRequest | AuthenticateRequest | ListProvidersRequest | SetProviderRequest | DisableProviderRequest | LogoutRequest | AuthStatusRequest | NewSessionRequest | LoadSessionRequest | ListSessionsRequest | DeleteSessionRequest | ForkSessionRequest | ArchiveSessionRequest | UnarchiveSessionRequest | SessionStatusRequest | SetSessionTitleRequest | ResumeSessionRequest | CloseSessionRequest | SetSessionModeRequest | SetSessionConfigOptionRequest | PromptRequest | ExtRequest) | null;
 };
 
 /**
@@ -3319,7 +3608,7 @@ export type ClientRequest = {
  *
  * Sent by the client to establish connection and negotiate capabilities.
  *
- * See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/initialization)
+ * See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/v1/draft/initialization)
  */
 export type InitializeRequest = {
   /** The latest protocol version supported by the client. */
@@ -3337,7 +3626,7 @@ export type InitializeRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3348,7 +3637,7 @@ export type InitializeRequest = {
  * Advertised during initialization to inform the agent about
  * available features and methods.
  *
- * See protocol docs: [Client Capabilities](https://agentclientprotocol.com/protocol/initialization#client-capabilities)
+ * See protocol docs: [Client Capabilities](https://agentclientprotocol.com/protocol/v1/draft/initialization#client-capabilities)
  */
 export type ClientCapabilities = {
   /**
@@ -3365,6 +3654,19 @@ export type ClientCapabilities = {
    * session-related extensions.
    */
   session?: ClientSessionCapabilities | null;
+  /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Whether the client understands exposed subagent sessions.
+   *
+   * Optional and nullable. Omitted or `null` both mean the client does not
+   * advertise support.
+   * Supplying `{}` means the client understands child associations, work-state
+   * snapshots, session-directed messages, and restricted-session semantics.
+   */
+  subagents?: SubagentCapabilities | null;
   /**
    * **UNSTABLE**
    *
@@ -3391,30 +3693,11 @@ export type ClientCapabilities = {
    */
   elicitation?: ElicitationCapabilities | null;
   /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
-   * NES (Next Edit Suggestions) capabilities supported by the client.
-   *
-   * Optional. Omitted or `null` both mean the client does not advertise any
-   * NES suggestion-kind extensions.
-   */
-  nes?: ClientNesCapabilities | null;
-  /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
-   * The position encodings supported by the client, in order of preference.
-   */
-  positionEncodings?: Array<PositionEncodingKind>;
-  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3422,7 +3705,7 @@ export type ClientCapabilities = {
 /**
  * File system capabilities that a client may support.
  *
- * See protocol docs: [FileSystem](https://agentclientprotocol.com/protocol/initialization#filesystem)
+ * See protocol docs: [FileSystem](https://agentclientprotocol.com/protocol/v1/draft/initialization#filesystem)
  */
 export type FileSystemCapabilities = {
   /** Whether the Client supports `fs/read_text_file` requests. */
@@ -3434,7 +3717,7 @@ export type FileSystemCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3442,12 +3725,8 @@ export type FileSystemCapabilities = {
 /** Session-related capabilities supported by the client. */
 export type ClientSessionCapabilities = {
   /**
-   * **UNSTABLE**
-   *
-   * This capability is not part of the spec yet, and may be removed or changed at any point.
-   *
    * Support for ID-addressed context compaction updates. Omitted or `null`
-   * means unsupported; `{}` advertises the complete compaction contract.
+   * means unsupported. `{}` advertises the complete compaction contract.
    */
   compaction?: CompactionCapabilities | null;
   /**
@@ -3458,22 +3737,23 @@ export type ClientSessionCapabilities = {
    */
   configOptions?: SessionConfigOptionsCapabilities | null;
   /**
+   * Support for live user-facing `notice` session updates.
+   *
+   * Optional. Omitted or `null` both mean the client does not advertise support.
+   * Supplying `{}` means the client can present notices to the user.
+   */
+  notices?: NoticeCapabilities | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
 
-/**
- * **UNSTABLE**
- *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
- *
- * Client support for ID-addressed context compaction updates.
- */
+/** Client support for ID-addressed context compaction updates. */
 export type CompactionCapabilities = Record<string, unknown>;
 
 /** Session configuration option capabilities supported by the client. */
@@ -3492,7 +3772,7 @@ export type SessionConfigOptionsCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3508,7 +3788,31 @@ export type BooleanConfigOptionCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/** Client support for presenting live notices to the user. */
+export type NoticeCapabilities = Record<string, unknown>;
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Capability marker for exposing reusable child sessions as restricted ACP sessions.
+ *
+ * Supplying `{}` advertises support for child association and state updates,
+ * session-directed messages, and restricted-session semantics. The client
+ * must advertise this capability before the agent sends subagent updates or
+ * session-directed messages.
+ */
+export type SubagentCapabilities = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3526,7 +3830,7 @@ export type PlanCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3552,7 +3856,7 @@ export type AuthCapabilities = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3580,7 +3884,7 @@ export type ElicitationCapabilities = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3598,7 +3902,7 @@ export type ElicitationFormCapabilities = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3616,61 +3920,7 @@ export type ElicitationUrlCapabilities = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** NES capabilities advertised by the client during initialization. */
-export type ClientNesCapabilities = {
-  /** Whether the client supports the `jump` suggestion kind. */
-  jump?: NesJumpCapabilities | null;
-  /** Whether the client supports the `rename` suggestion kind. */
-  rename?: NesRenameCapabilities | null;
-  /** Whether the client supports the `searchAndReplace` suggestion kind. */
-  searchAndReplace?: NesSearchAndReplaceCapabilities | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Marker for jump suggestion support. */
-export type NesJumpCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Marker for rename suggestion support. */
-export type NesRenameCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Marker for search and replace suggestion support. */
-export type NesSearchAndReplaceCapabilities = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3691,7 +3941,7 @@ export type AuthenticateRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3709,7 +3959,7 @@ export type ListProvidersRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3740,7 +3990,7 @@ export type SetProviderRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3760,7 +4010,7 @@ export type DisableProviderRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3776,7 +4026,30 @@ export type LogoutRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Request parameters for the `auth/status` method.
+ *
+ * Queries the agent's current authentication state without changing it.
+ *
+ * Agents MUST NOT reject it with `auth_required` (`-32000`), since Clients call it to learn
+ * whether authentication is required.
+ */
+export type AuthStatusRequest = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3784,7 +4057,7 @@ export type LogoutRequest = {
 /**
  * Request parameters for creating a new session.
  *
- * See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/session-setup#creating-a-session)
+ * See protocol docs: [Creating a Session](https://agentclientprotocol.com/protocol/v1/draft/session-setup#creating-a-session)
  */
 export type NewSessionRequest = {
   /** The working directory for this session. Must be an absolute path. */
@@ -3800,11 +4073,19 @@ export type NewSessionRequest = {
   /** List of MCP (Model Context Protocol) servers the agent should connect to. */
   mcpServers: Array<McpServer>;
   /**
+   * System-level instructions for the new session.
+   *
+   * Optional. Omitted and `null` are equivalent and mean the Agent uses its
+   * own default instructions. Clients MUST only send this when the Agent
+   * advertises `sessionCapabilities.systemPrompt`.
+   */
+  systemPrompt?: SystemPrompt | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3815,7 +4096,7 @@ export type NewSessionRequest = {
  * MCP servers provide tools and context that the agent can use when
  * processing prompts.
  *
- * See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
+ * See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/v1/draft/session-setup#mcp-servers)
  */
 export type McpServer = ({
   type: "http";
@@ -3836,7 +4117,7 @@ export type HttpHeader = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3854,7 +4135,7 @@ export type McpServerHttp = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3872,7 +4153,7 @@ export type McpServerSse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3885,7 +4166,7 @@ export type McpServerSse = {
  * ACP transport configuration for MCP.
  *
  * The MCP server is provided by an ACP component and communicates over the ACP channel
- * using `mcp/connect`, `mcp/message`, and `mcp/disconnect`.
+ * using `mcp/message`.
  */
 export type McpServerAcp = {
   /** Human-readable name identifying this MCP server. */
@@ -3902,7 +4183,7 @@ export type McpServerAcp = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3922,17 +4203,64 @@ export type McpServerStdio = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
+
+/**
+ * Client-provided system-level instructions for a session.
+ *
+ * Clients MUST only send this when the Agent advertises
+ * `sessionCapabilities.systemPrompt`. Agents that cannot apply it, for example
+ * because of an unadvertised mode or an unsupported content block type, MUST
+ * return an error instead of creating, loading, or resuming the session.
+ */
+export type SystemPrompt = {
+  /**
+   * How the Agent combines `content` with its own instructions.
+   *
+   * Required. Agents MUST return an error for a mode they do not support rather than
+   * treating it as `append` or `override`.
+   */
+  mode: SystemPromptMode;
+  /**
+   * The system prompt content.
+   *
+   * Agents advertising the capability MUST accept `text` content blocks.
+   * Clients MUST NOT send other content block types until a future
+   * capability allows them, and Agents MUST return an error for content
+   * blocks they do not support.
+   *
+   * Clients MUST NOT send an empty array. Agents MAY reject one with
+   * `-32602` without creating, loading, or resuming the session.
+   */
+  content: Array<ContentBlock>;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * How the Agent combines a client-provided system prompt with its own instructions.
+ *
+ * Unknown modes are preserved so they can be stored,
+ * proxied, or forwarded. An Agent MUST return an error for a mode it does not
+ * support rather than treating it as `append` or `override`.
+ */
+export type SystemPromptMode = "append" | "override" | string;
 
 /**
  * Request parameters for loading an existing session.
  *
  * Only available if the Agent supports the `loadSession` capability.
  *
- * See protocol docs: [Loading Sessions](https://agentclientprotocol.com/protocol/session-setup#loading-sessions)
+ * See protocol docs: [Loading Sessions](https://agentclientprotocol.com/protocol/v1/draft/session-setup#loading-sessions)
  */
 export type LoadSessionRequest = {
   /** List of MCP servers to connect to for this session. */
@@ -3951,11 +4279,21 @@ export type LoadSessionRequest = {
   /** The ID of the session to load. */
   sessionId: SessionId;
   /**
+   * System-level instructions for the loaded session.
+   *
+   * Optional. Omitted and `null` are equivalent. The Agent may then keep a
+   * system prompt it stored with the session or use its default instructions.
+   * Clients MUST only send this when the Agent advertises
+   * `sessionCapabilities.systemPrompt`, and SHOULD send the same value they used
+   * when the session was created.
+   */
+  systemPrompt?: SystemPrompt | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -3971,14 +4309,38 @@ export type ListSessionsRequest = {
   /** Opaque cursor token from a previous response's nextCursor field for cursor-based pagination */
   cursor?: string | null;
   /**
+   * **UNSTABLE**
+   *
+   * This capability is not part of the spec yet, and may be removed or changed at any point.
+   *
+   * Filter sessions by archive state.
+   *
+   * Optional. Omitted and `null` are equivalent and mean `exclude`. Only send this when
+   * the Agent advertises the `sessionCapabilities.archive` capability. The filter combines with `cwd` and
+   * applies before pagination. Clients keep the same value when following `nextCursor`.
+   */
+  archived?: SessionArchiveFilter | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Which sessions `session/list` returns based on their archive state.
+ *
+ * Unknown values are preserved so they can be stored, proxied, or forwarded. An Agent MUST
+ * return `-32602` for a value it does not support rather than treating it as `exclude`.
+ */
+export type SessionArchiveFilter = "exclude" | "include" | "only" | string;
 
 /**
  * Request parameters for deleting an existing session from `session/list`.
@@ -3993,7 +4355,7 @@ export type DeleteSessionRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4026,11 +4388,139 @@ export type ForkSessionRequest = {
   /** List of MCP servers to connect to for this session. */
   mcpServers?: Array<McpServer>;
   /**
+   * System-level instructions for the forked session.
+   *
+   * Optional. Omitted and `null` are equivalent. The Agent may then keep a
+   * system prompt it stored with the source session or use its default
+   * instructions. Clients MUST only send this when the Agent advertises
+   * `sessionCapabilities.systemPrompt`, and SHOULD send the same value they used
+   * for the source session.
+   */
+  systemPrompt?: SystemPrompt | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Request parameters for archiving a session.
+ *
+ * Only available if the Agent supports the `sessionCapabilities.archive` capability.
+ *
+ * Archiving hides the session from default `session/list` results. It keeps the session ID
+ * and saved history. If the session is active, the Agent MUST cancel any ongoing work and
+ * free the session's resources as if `session/close` had been called, then archive it.
+ * Archiving an archived session succeeds. A session that does not exist gets `-32002`.
+ */
+export type ArchiveSessionRequest = {
+  /** The ID of the session to archive. */
+  sessionId: SessionId;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Request parameters for unarchiving a session.
+ *
+ * Only available if the Agent supports the `sessionCapabilities.archive` capability.
+ *
+ * Unarchiving returns the session to default `session/list` results with the same ID and
+ * saved history. It never loads or resumes the session. Clients that want to continue an
+ * archived session SHOULD unarchive it before calling `session/load` or `session/resume`.
+ * Unarchiving a session that is not archived succeeds. A session that does not exist
+ * gets `-32002`.
+ */
+export type UnarchiveSessionRequest = {
+  /** The ID of the session to unarchive. */
+  sessionId: SessionId;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Request parameters for checking the status of a session.
+ *
+ * Only available if the Agent supports the `sessionCapabilities.status` capability.
+ *
+ * `session/status` MUST NOT have side effects. The Agent does not load, resume, create,
+ * close, or change the session, and does not attach the requesting connection to it.
+ * A session the Agent does not know gets `-32002` with the requested `sessionId` in `data`.
+ */
+export type SessionStatusRequest = {
+  /** The ID of the session to check. */
+  sessionId: SessionId;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Request parameters for setting the title of a session.
+ *
+ * Only available if the Agent supports the `sessionCapabilities.title` capability.
+ *
+ * The session does not need to be active on the connection. Any session the Agent would
+ * return from `session/list` can be retitled. A session that does not exist gets `-32002`.
+ *
+ * The Agent responds only after it has stored the title. After a successful response, the
+ * Agent SHOULD NOT replace the title with one it generates automatically.
+ */
+export type SetSessionTitleRequest = {
+  /** The ID of the session to retitle. */
+  sessionId: SessionId;
+  /**
+   * The new title for the session.
+   *
+   * Required and non-null. Omission and explicit `null` are both invalid. The Agent MAY
+   * normalize the title before storing it, for example by trimming whitespace or
+   * truncating it. The Agent rejects a title that fails its validation, including one
+   * that is empty after normalization, with `-32602`.
+   */
+  title: string;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4060,11 +4550,21 @@ export type ResumeSessionRequest = {
   /** List of MCP servers to connect to for this session. */
   mcpServers?: Array<McpServer>;
   /**
+   * System-level instructions for the resumed session.
+   *
+   * Optional. Omitted and `null` are equivalent. The Agent may then keep a
+   * system prompt it stored with the session or use its default instructions.
+   * Clients MUST only send this when the Agent advertises
+   * `sessionCapabilities.systemPrompt`, and SHOULD send the same value they used
+   * when the session was created.
+   */
+  systemPrompt?: SystemPrompt | null;
+  /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4086,7 +4586,7 @@ export type CloseSessionRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4102,7 +4602,7 @@ export type SetSessionModeRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4118,13 +4618,13 @@ export type SetSessionConfigOptionRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 } & ({
+  type: "boolean";
   /** The boolean value. */
   value: boolean;
-  type: "boolean";
 } | {
   /** The value ID. */
   value: SessionConfigValueId;
@@ -4135,7 +4635,7 @@ export type SetSessionConfigOptionRequest = {
  *
  * Contains the user's message and any additional context.
  *
- * See protocol docs: [User Message](https://agentclientprotocol.com/protocol/prompt-turn#1-user-message)
+ * See protocol docs: [User Message](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#1-user-message)
  */
 export type PromptRequest = {
   /** The ID of the session to send this user message to */
@@ -4143,15 +4643,15 @@ export type PromptRequest = {
   /**
    * The blocks of content that compose the user's message.
    *
-   * As a baseline, the Agent MUST support [`ContentBlock::Text`] and [`ContentBlock::ResourceLink`],
-   * while other variants are optionally enabled via [`PromptCapabilities`].
+   * As a baseline, the Agent MUST support `text` and `resource_link` content blocks,
+   * while other variants are optionally enabled via `PromptCapabilities`.
    *
-   * The Client MUST adapt its interface according to [`PromptCapabilities`].
+   * The Client MUST adapt its interface according to `PromptCapabilities`.
    *
    * The client MAY include referenced pieces of context as either
-   * [`ContentBlock::Resource`] or [`ContentBlock::ResourceLink`].
+   * `resource` or `resource_link` content blocks.
    *
-   * When available, [`ContentBlock::Resource`] is preferred
+   * When available, `resource` is preferred
    * as it avoids extra round-trips and allows the message to include
    * pieces of context from sources the agent may not have access to.
    */
@@ -4161,262 +4661,7 @@ export type PromptRequest = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Request to start an NES session. */
-export type StartNesRequest = {
-  /** The root URI of the workspace. */
-  workspaceUri?: string | null;
-  /** The workspace folders. */
-  workspaceFolders?: Array<WorkspaceFolder> | null;
-  /** Repository metadata, if the workspace is a git repository. */
-  repository?: NesRepository | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A workspace folder. */
-export type WorkspaceFolder = {
-  /** The URI of the folder. */
-  uri: string;
-  /** The display name of the folder. */
-  name: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Repository metadata for an NES session. */
-export type NesRepository = {
-  /** The repository name. */
-  name: string;
-  /** The repository owner. */
-  owner: string;
-  /** The remote URL of the repository. */
-  remoteUrl: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Request for a code suggestion. */
-export type SuggestNesRequest = {
-  /** The session ID for this request. */
-  sessionId: SessionId;
-  /** The URI of the document to suggest for. */
-  uri: string;
-  /** The version number of the document. */
-  version: number;
-  /** The current cursor position. */
-  position: Position;
-  /** The current text selection range, if any. */
-  selection?: Range | null;
-  /** What triggered this suggestion request. */
-  triggerKind: NesTriggerKind;
-  /** Context for the suggestion, included based on agent capabilities. */
-  context?: NesSuggestContext | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** What triggered the suggestion request. */
-export type NesTriggerKind = "automatic" | "diagnostic" | "manual";
-
-/** Context attached to a suggestion request. */
-export type NesSuggestContext = {
-  /** Recently accessed files. */
-  recentFiles?: Array<NesRecentFile> | null;
-  /** Related code snippets. */
-  relatedSnippets?: Array<NesRelatedSnippet> | null;
-  /** Recent edit history. */
-  editHistory?: Array<NesEditHistoryEntry> | null;
-  /** Recent user actions (typing, navigation, etc.). */
-  userActions?: Array<NesUserAction> | null;
-  /** Currently open files in the editor. */
-  openFiles?: Array<NesOpenFile> | null;
-  /** Current diagnostics (errors, warnings). */
-  diagnostics?: Array<NesDiagnostic> | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A recently accessed file. */
-export type NesRecentFile = {
-  /** The URI of the file. */
-  uri: string;
-  /** The language identifier. */
-  languageId: string;
-  /** The full text content of the file. */
-  text: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A related code snippet from a file. */
-export type NesRelatedSnippet = {
-  /** The URI of the file containing the snippets. */
-  uri: string;
-  /** The code excerpts. */
-  excerpts: Array<NesExcerpt>;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A code excerpt from a file. */
-export type NesExcerpt = {
-  /** The start line of the excerpt (zero-based). */
-  startLine: number;
-  /** The end line of the excerpt (zero-based). */
-  endLine: number;
-  /** The text content of the excerpt. */
-  text: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** An entry in the edit history. */
-export type NesEditHistoryEntry = {
-  /** The URI of the edited file. */
-  uri: string;
-  /** A diff representing the edit. */
-  diff: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A user action (typing, cursor movement, etc.). */
-export type NesUserAction = {
-  /** The kind of action (e.g., "insertChar", "cursorMovement"). */
-  action: string;
-  /** The URI of the file where the action occurred. */
-  uri: string;
-  /** The position where the action occurred. */
-  position: Position;
-  /** Timestamp in milliseconds since epoch. */
-  timestampMs: number;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** An open file in the editor. */
-export type NesOpenFile = {
-  /** The URI of the file. */
-  uri: string;
-  /** The language identifier. */
-  languageId: string;
-  /** The visible range in the editor, if any. */
-  visibleRange?: Range | null;
-  /** Timestamp in milliseconds since epoch of when the file was last focused. */
-  lastFocusedMs?: number | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** A diagnostic (error, warning, etc.). */
-export type NesDiagnostic = {
-  /** The URI of the file containing the diagnostic. */
-  uri: string;
-  /** The range of the diagnostic. */
-  range: Range;
-  /** The severity of the diagnostic. */
-  severity: NesDiagnosticSeverity;
-  /** The diagnostic message. */
-  message: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Severity of a diagnostic. */
-export type NesDiagnosticSeverity = "error" | "warning" | "information" | "hint";
-
-/**
- * Request to close an NES session.
- *
- * The agent **must** cancel any ongoing work related to the NES session
- * and then free up any resources associated with the session.
- */
-export type CloseNesRequest = {
-  /** The ID of the NES session to close. */
-  sessionId: SessionId;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4426,7 +4671,7 @@ export type ClientResponse = ({
   /** The id of the request this response answers. */
   id: RequestId;
   /** Method-specific response data. */
-  result: WriteTextFileResponse | ReadTextFileResponse | RequestPermissionResponse | CreateTerminalResponse | TerminalOutputResponse | ReleaseTerminalResponse | WaitForTerminalExitResponse | KillTerminalResponse | CreateElicitationResponse | ConnectMcpResponse | DisconnectMcpResponse | MessageMcpResponse | ExtResponse;
+  result: WriteTextFileResponse | ReadTextFileResponse | RequestPermissionResponse | CreateTerminalResponse | TerminalOutputResponse | ReleaseTerminalResponse | WaitForTerminalExitResponse | KillTerminalResponse | CreateElicitationResponse | MessageMcpResponse | ExtResponse;
 }) | {
   /** The id of the request this response answers. */
   id: RequestId;
@@ -4441,7 +4686,7 @@ export type WriteTextFileResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4455,7 +4700,7 @@ export type ReadTextFileResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4469,7 +4714,7 @@ export type RequestPermissionResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4490,7 +4735,7 @@ export type SelectedPermissionOutcome = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4504,7 +4749,7 @@ export type CreateTerminalResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4522,7 +4767,7 @@ export type TerminalOutputResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4538,7 +4783,7 @@ export type TerminalExitStatus = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4550,7 +4795,7 @@ export type ReleaseTerminalResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4566,7 +4811,7 @@ export type WaitForTerminalExitResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4578,7 +4823,7 @@ export type KillTerminalResponse = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4592,7 +4837,7 @@ export type CreateElicitationResponse = {
    *
    * Optional. Omitted and `null` are equivalent and mean no metadata.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 } & ({
@@ -4612,7 +4857,7 @@ export type CreateElicitationResponse = {
   action: string;
 };
 
-/** Allowed wire representations for [`ElicitationContentValue`]. */
+/** Allowed wire representations for `ElicitationContentValue`. */
 export type ElicitationContentValue = string | number | boolean | Array<string>;
 
 /** The user accepted the elicitation and provided content. */
@@ -4624,39 +4869,42 @@ export type ElicitationAcceptAction = {
 /**
  * **UNSTABLE**
  *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
+ * The successful outer ACP `mcp/message` response carries exactly one
+ * inner MCP outcome: an opaque result (including JSON null), or an MCP error.
+ * Outer ACP errors are reserved for binding and runtime failures.
  *
- * Response to `mcp/connect`.
+ * Both branches require their carrier key. An error must be a non-null object.
+ * Unknown outer fields are ignored. Inner result and error fields are preserved.
+ * Carrier `_meta` is optional. Null or invalid values are treated as absent.
+ * Senders must include exactly one outcome. Receivers prefer `result` if both are present.
  */
-export type ConnectMcpResponse = {
-  /** The unique identifier for this MCP-over-ACP connection. */
-  connectionId: McpConnectionId;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
+export type MessageMcpResponse = ({
+  /** Required, even if JSON null. */
+  result: unknown;
+  /** Optional ACP carrier metadata. */
   _meta?: Record<string, unknown> | null;
-};
+}) | ({
+  /** Required, non-null MCP error object. */
+  error: McpError;
+  /** Optional ACP carrier metadata. */
+  _meta?: Record<string, unknown> | null;
+});
 
 /**
  * **UNSTABLE**
  *
- * This capability is not part of the spec yet, and may be removed or changed at any point.
+ * An inner MCP error, distinct from an outer ACP binding or runtime error.
  *
- * Response to `mcp/disconnect`.
+ * `code` and `message` are required and non-null. `data` is optional.
+ * Explicit `null` is preserved separately from an omitted key.
  */
-export type DisconnectMcpResponse = {
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
+export type McpError = {
+  /** Inner MCP error code. Never an ACP error code. */
+  code: number;
+  /** Inner MCP error message. */
+  message: string;
+  /** Optional error data. Explicit null is retained. */
+  data?: unknown;
 };
 
 /** A JSON-RPC notification object. */
@@ -4664,13 +4912,13 @@ export type ClientNotification = {
   /** The notification method name. */
   method: string;
   /** Method-specific notification parameters. */
-  params?: (CancelNotification | DidOpenDocumentNotification | DidChangeDocumentNotification | DidCloseDocumentNotification | DidSaveDocumentNotification | DidFocusDocumentNotification | AcceptNesNotification | RejectNesNotification | MessageMcpNotification | ExtNotification) | null;
+  params?: (CancelNotification | MessageMcpNotification | ExtNotification) | null;
 };
 
 /**
  * Notification to cancel ongoing operations for a session.
  *
- * See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/prompt-turn#cancellation)
+ * See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v1/draft/prompt-turn#cancellation)
  */
 export type CancelNotification = {
   /** The ID of the session to cancel operations for. */
@@ -4680,169 +4928,48 @@ export type CancelNotification = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Notification sent when a file is opened in the editor. */
-export type DidOpenDocumentNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The URI of the opened document. */
-  uri: string;
-  /** The language identifier of the document (e.g., "rust", "python"). */
-  languageId: string;
-  /** The version number of the document. */
-  version: number;
-  /** The full text content of the document. */
-  text: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Notification sent when a file is edited. */
-export type DidChangeDocumentNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The URI of the changed document. */
-  uri: string;
-  /** The new version number of the document. */
-  version: number;
-  /** The content changes. */
-  contentChanges: Array<TextDocumentContentChangeEvent>;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
 
 /**
- * A content change event for a document.
+ * **UNSTABLE**
  *
- * When `range` is `None`, `text` is the full content of the document.
- * When `range` is `Some`, `text` replaces the given range.
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Notification parameters for `mcp/message`.
+ *
+ * Sent by the provider to the consumer for an active request (including
+ * subscription acknowledgements and updates). The outer envelope has no `id`.
  */
-export type TextDocumentContentChangeEvent = {
-  /** The range of the document that changed. If `None`, the entire content is replaced. */
-  range?: Range | null;
-  /** The new text for the range, or the full document content if `range` is `None`. */
-  text: string;
+export type MessageMcpNotification = {
+  /** The declared ACP MCP server handling the associated request. */
+  serverId: McpServerAcpId;
+  /** The identifier of the active inner MCP request. */
+  requestId: McpRequestId;
+  /** The inner MCP method name. */
+  method: string;
+  /**
+   * Optional inner MCP params.
+   *
+   * If omitted or set to `null`, the inner MCP message has no params.
+   */
+  params?: Record<string, unknown> | null;
   /**
    * The _meta property is reserved by ACP to allow clients and agents to attach additional
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
-
-/** Notification sent when a file is closed. */
-export type DidCloseDocumentNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The URI of the closed document. */
-  uri: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Notification sent when a file is saved. */
-export type DidSaveDocumentNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The URI of the saved document. */
-  uri: string;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Notification sent when a file becomes the active editor tab. */
-export type DidFocusDocumentNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The URI of the focused document. */
-  uri: string;
-  /** The version number of the document. */
-  version: number;
-  /** The current cursor position. */
-  position: Position;
-  /** The portion of the file currently visible in the editor viewport. */
-  visibleRange: Range;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Notification sent when a suggestion is accepted. */
-export type AcceptNesNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The ID of the accepted suggestion. */
-  id: NesSuggestionId;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** Notification sent when a suggestion is rejected. */
-export type RejectNesNotification = {
-  /** The session ID for this notification. */
-  sessionId: SessionId;
-  /** The ID of the rejected suggestion. */
-  id: NesSuggestionId;
-  /** The reason for rejection. */
-  reason?: NesRejectReason | null;
-  /**
-   * The _meta property is reserved by ACP to allow clients and agents to attach additional
-   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
-   * these keys.
-   *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
-   */
-  _meta?: Record<string, unknown> | null;
-};
-
-/** The reason a suggestion was rejected. */
-export type NesRejectReason = "rejected" | "ignored" | "replaced" | "cancelled";
 
 /**
  * Notification to cancel an ongoing request.
  *
- * See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/cancellation)
+ * See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v1/draft/cancellation)
  */
 export type CancelRequestNotification = {
   /** The ID of the request to cancel. */
@@ -4852,7 +4979,162 @@ export type CancelRequestNotification = {
    * metadata to their interactions. Implementations MUST NOT make assumptions about values at
    * these keys.
    *
-   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/** A JSON-RPC request object. */
+export type ProxyRequest = {
+  /** The request id used to correlate the matching response. */
+  id: RequestId;
+  /** The method name to invoke. */
+  method: string;
+  /** Method-specific request parameters. */
+  params?: (InitializeProxyRequest | ProxySuccessorRequest) | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Request parameters for `proxy/initialize`.
+ *
+ * A conductor sends `proxy/initialize` instead of `initialize` to every component that has a
+ * successor, which tells the component to run as a proxy. The params and the response are
+ * the same as for `initialize`. A conductor sends `initialize` to the final agent.
+ *
+ * The params carry the protocol version the conductor selected: the client's requested
+ * version, unless the conductor supports only a lower one. Before answering successfully,
+ * the proxy MUST forward an `initialize` request to its successor through `proxy/successor`.
+ *
+ * See the [Proxy Chains RFD](https://agentclientprotocol.com/rfds/proxy-chains).
+ */
+export type InitializeProxyRequest = InitializeRequest;
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Parameters of a `proxy/successor` request.
+ *
+ * A proxy sends it to forward a message to its successor, and the conductor sends it to
+ * deliver a message from the successor to the proxy. The envelope wraps one request: `method`
+ * and `params` are the wrapped request's method and params.
+ *
+ * The result or error of the wrapped request is returned unchanged, as the same JSON value,
+ * as the result or error of the `proxy/successor` request. Errors the conductor returns
+ * itself, for example because the successor has exited, are not wrapped results.
+ *
+ * To cancel it, the sender sends `$/cancel_request` with the ID of this `proxy/successor`
+ * request on the same connection. Cancellation is never forwarded to another hop.
+ *
+ * See the [Proxy Chains RFD](https://agentclientprotocol.com/rfds/proxy-chains).
+ */
+export type ProxySuccessorRequest = {
+  /** Method name of the wrapped request. */
+  method: string;
+  /**
+   * Params of the wrapped request, forwarded unchanged.
+   *
+   * Optional. Omitted and `null` are equivalent and mean the wrapped request has no params.
+   * When present, it MUST be a JSON object or array, as JSON-RPC requires.
+   * The wrapped request's own `_meta` stays inside these params.
+   */
+  params?: unknown;
+  /**
+   * Metadata for the `proxy/successor` envelope itself, separate from the wrapped
+   * message's `_meta`. It is hop-local: the conductor does not copy it into the message
+   * it unwraps.
+   *
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+};
+
+/** A JSON-RPC response object. */
+export type ProxyResponse = ({
+  /** The id of the request this response answers. */
+  id: RequestId;
+  /** Method-specific response data. */
+  result: InitializeProxyResponse | ProxySuccessorResponse;
+}) | {
+  /** The id of the request this response answers. */
+  id: RequestId;
+  /** Method-specific error data. */
+  error: Error;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Response to `proxy/initialize`.
+ *
+ * The same as the `initialize` response. The proxy builds it from its successor's
+ * `initialize` response and answers with the capabilities of the chain from itself onward.
+ * It MUST NOT change `protocolVersion`.
+ */
+export type InitializeProxyResponse = InitializeResponse;
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Result of a `proxy/successor` request: the wrapped request's result, forwarded unchanged.
+ */
+export type ProxySuccessorResponse = unknown;
+
+/** A JSON-RPC notification object. */
+export type ProxyNotification = {
+  /** The notification method name. */
+  method: string;
+  /** Method-specific notification parameters. */
+  params?: ProxySuccessorNotification | null;
+};
+
+/**
+ * **UNSTABLE**
+ *
+ * This capability is not part of the spec yet, and may be removed or changed at any point.
+ *
+ * Parameters of a `proxy/successor` notification.
+ *
+ * A proxy sends it to forward a message to its successor, and the conductor sends it to
+ * deliver a message from the successor to the proxy. The envelope wraps one notification: `method`
+ * and `params` are the wrapped notification's method and params.
+ *
+ * See the [Proxy Chains RFD](https://agentclientprotocol.com/rfds/proxy-chains).
+ */
+export type ProxySuccessorNotification = {
+  /** Method name of the wrapped notification. */
+  method: string;
+  /**
+   * Params of the wrapped notification, forwarded unchanged.
+   *
+   * Optional. Omitted and `null` are equivalent and mean the wrapped notification has no params.
+   * When present, it MUST be a JSON object or array, as JSON-RPC requires.
+   * The wrapped notification's own `_meta` stays inside these params.
+   */
+  params?: unknown;
+  /**
+   * Metadata for the `proxy/successor` envelope itself, separate from the wrapped
+   * message's `_meta`. It is hop-local: the conductor does not copy it into the message
+   * it unwraps.
+   *
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)
    */
   _meta?: Record<string, unknown> | null;
 };
@@ -4864,29 +5146,22 @@ export type CancelRequestNotification = {
  */
 export const ACP_METHODS = {
   "$/cancel_request": { side: "protocol", types: ["CancelRequestNotification"] },
+  "auth/status": { side: "agent", types: ["AuthStatusRequest", "AuthStatusResponse"] },
+  "auth/status_update": { side: "client", types: ["AuthStatusUpdateNotification"] },
   authenticate: { side: "agent", types: ["AuthenticateRequest", "AuthenticateResponse"] },
-  "document/didChange": { side: "agent", types: ["DidChangeDocumentNotification"] },
-  "document/didClose": { side: "agent", types: ["DidCloseDocumentNotification"] },
-  "document/didFocus": { side: "agent", types: ["DidFocusDocumentNotification"] },
-  "document/didOpen": { side: "agent", types: ["DidOpenDocumentNotification"] },
-  "document/didSave": { side: "agent", types: ["DidSaveDocumentNotification"] },
   "elicitation/complete": { side: "client", types: ["CompleteElicitationNotification"] },
   "elicitation/create": { side: "client", types: ["CreateElicitationRequest", "CreateElicitationResponse"] },
   "fs/read_text_file": { side: "client", types: ["ReadTextFileRequest", "ReadTextFileResponse"] },
   "fs/write_text_file": { side: "client", types: ["WriteTextFileRequest", "WriteTextFileResponse"] },
   initialize: { side: "agent", types: ["InitializeRequest", "InitializeResponse"] },
   logout: { side: "agent", types: ["LogoutRequest", "LogoutResponse"] },
-  "mcp/connect": { side: "client", types: ["ConnectMcpRequest", "ConnectMcpResponse"] },
-  "mcp/disconnect": { side: "client", types: ["DisconnectMcpRequest", "DisconnectMcpResponse"] },
-  "mcp/message": { side: "both", types: ["MessageMcpNotification", "MessageMcpRequest", "MessageMcpResponse"] },
-  "nes/accept": { side: "agent", types: ["AcceptNesNotification"] },
-  "nes/close": { side: "agent", types: ["CloseNesRequest", "CloseNesResponse"] },
-  "nes/reject": { side: "agent", types: ["RejectNesNotification"] },
-  "nes/start": { side: "agent", types: ["StartNesRequest", "StartNesResponse"] },
-  "nes/suggest": { side: "agent", types: ["SuggestNesRequest", "SuggestNesResponse"] },
+  "mcp/message": { side: "agent+client", types: ["MessageMcpNotification", "MessageMcpRequest", "MessageMcpResponse"] },
   "providers/disable": { side: "agent", types: ["DisableProviderRequest", "DisableProviderResponse"] },
   "providers/list": { side: "agent", types: ["ListProvidersRequest", "ListProvidersResponse"] },
   "providers/set": { side: "agent", types: ["SetProviderRequest", "SetProviderResponse"] },
+  "proxy/initialize": { side: "proxy", types: ["InitializeProxyRequest", "InitializeProxyResponse"] },
+  "proxy/successor": { side: "proxy", types: ["ProxySuccessorNotification", "ProxySuccessorRequest", "ProxySuccessorResponse"] },
+  "session/archive": { side: "agent", types: ["ArchiveSessionRequest", "ArchiveSessionResponse"] },
   "session/cancel": { side: "agent", types: ["CancelNotification"] },
   "session/close": { side: "agent", types: ["CloseSessionRequest", "CloseSessionResponse"] },
   "session/delete": { side: "agent", types: ["DeleteSessionRequest", "DeleteSessionResponse"] },
@@ -4899,6 +5174,9 @@ export const ACP_METHODS = {
   "session/resume": { side: "agent", types: ["ResumeSessionRequest", "ResumeSessionResponse"] },
   "session/set_config_option": { side: "agent", types: ["SetSessionConfigOptionRequest", "SetSessionConfigOptionResponse"] },
   "session/set_mode": { side: "agent", types: ["SetSessionModeRequest", "SetSessionModeResponse"] },
+  "session/set_title": { side: "agent", types: ["SetSessionTitleRequest", "SetSessionTitleResponse"] },
+  "session/status": { side: "agent", types: ["SessionStatusRequest", "SessionStatusResponse"] },
+  "session/unarchive": { side: "agent", types: ["UnarchiveSessionRequest", "UnarchiveSessionResponse"] },
   "session/update": { side: "client", types: ["SessionNotification"] },
   "terminal/create": { side: "client", types: ["CreateTerminalRequest", "CreateTerminalResponse"] },
   "terminal/kill": { side: "client", types: ["KillTerminalRequest", "KillTerminalResponse"] },

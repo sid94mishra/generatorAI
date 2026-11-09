@@ -53,7 +53,7 @@
 
 /* W10 */
 
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import type { EventBus } from '@generatorai/core';
 import type { PersistedEvent } from '@generatorai/shared';
 

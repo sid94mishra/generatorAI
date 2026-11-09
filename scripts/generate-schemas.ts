@@ -30,10 +30,11 @@
  * ── What is obtainable, verified 2026-08-30 ───────────────────────────────
  * ACP    → GENERATED. `@agentclientprotocol/sdk` is pinned to an exact version
  *          in packages/agent-harness-providers/package.json and ships the real
- *          370 KB JSON Schema at `schema/schema.json`, declared in its own
- *          `exports` map. That is a genuine, versioned, offline, pinned
- *          artifact, and every type emitted into `acp.generated.ts` — all 265
- *          of them — is derived from it.
+ *          JSON Schema at `schema/v1/schema.unstable.json` (2.x; the stable
+ *          and unstable protocol v1 surface — we use unstable fields such as
+ *          `usage` and plan updates), declared in its own `exports` map. That
+ *          is a genuine, versioned, offline, pinned artifact, and every type
+ *          emitted into `acp.generated.ts` — all 252 of them — is derived from it.
  * codex  → GENERATED from a COMMITTED artifact. `@openai/codex` is pinned as an
  *          optional dependency of packages/agent-harness-providers, and
  *          `schemas/codex/codex_app_server_protocol.schemas.json` is captured

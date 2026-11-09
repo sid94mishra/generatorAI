@@ -7,7 +7,7 @@
     "acp": {
       "status": "generated",
       "npmPackage": "@agentclientprotocol/sdk",
-      "artifactExport": "./schema/schema.json",
+      "artifactExport": "./schema/v1/schema.unstable.json",
       "methodTable": "x-method",
       "tableName": "ACP",
       "output": "acp.generated.ts"
