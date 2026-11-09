@@ -148,8 +148,8 @@ export type { NullComputerBridgeOptions } from './computer/NullComputerBridge.js
 export { CuaDriverBridge } from './computer/CuaDriverBridge.js';
 export { AndroidBridge } from './devices/AndroidBridge.js';
 export type { AndroidBridgeOptions } from './devices/AndroidBridge.js';
-export { IosSimulatorBridge } from './devices/IosSimulatorBridge.js';
-export type { IosSimulatorBridgeOptions } from './devices/IosSimulatorBridge.js';
+export { IosSimulatorBridge, spawnNodeScript } from './devices/IosSimulatorBridge.js';
+export type { IosSimulatorBridgeOptions, ScriptLauncher, ScriptProcess } from './devices/IosSimulatorBridge.js';
 export type { CuaDriverBridgeOptions, CuaDriverEndpoint } from './computer/CuaDriverBridge.js';
 export { transcodeScreenshot } from './computer/screenshotCodec.js';
 export type { ScreenshotFormat, TranscodeRequest, TranscodeResult } from './computer/screenshotCodec.js';

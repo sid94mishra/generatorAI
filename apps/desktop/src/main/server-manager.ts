@@ -33,7 +33,8 @@ import { loadSettings, saveSettings } from './config';
 import { loadOrCreateSecretKey } from './secret-protection';
 import type { ServerStatus, ServerState } from '../shared/ipc';
 import { repairProcessPath } from './login-shell-path';
-import { forkUtilityServer, spawnNodeServer, type ServerChild } from './server-child';
+import { forkHelperScript, forkUtilityServer, spawnNodeServer, type ServerChild } from './server-child';
+import { NodeHelpers } from './node-helpers';
 
 /** Mirrors apps/server/src/parentChannel.ts: the server asks for the vault key over its channel (F-8). */
 const SECRET_KEY_HANDOFF_ENV = 'GENERATORAI_SECRET_KEY_HANDOFF';
@@ -356,10 +357,16 @@ export class ServerManager extends EventEmitter {
         ? forkUtilityServer(launch.modulePath, { cwd: launch.cwd, env, serviceName: 'GeneratorAI Server' })
         : spawnNodeServer(launch.command, launch.args, { cwd: launch.cwd, env });
     this.child = child;
+    // The packaged server cannot run a script itself (RunAsNode off); it asks us to fork its helpers.
+    const helpers =
+      child.kind === 'utility'
+        ? new NodeHelpers({ root: this.paths.resourcesDir, fork: forkHelperScript, send: (m) => child.send(m), log })
+        : null;
 
     child.onMessage((msg: unknown) => {
       const m = msg as { type?: unknown; workspaceId?: unknown } | null;
       if (!m) return;
+      if (helpers?.handle(m)) return;
       // F-8: answered only to this child, over its own channel.
       if (m.type === 'secret-key-request') {
         child.send({ type: 'secret-key', key: this.handoffKey });
@@ -381,6 +388,7 @@ export class ServerManager extends EventEmitter {
 
     child.onExit((code, signal) => {
       log.warn('Server process exited', { code, signal });
+      helpers?.stopAll();
       this.child = null;
       this.port = this.port; // keep last port for status display
       if (this.intentionalStop || this.stopping) {

@@ -3,17 +3,21 @@
 //
 //  - Lifecycle, apps, URLs, logs: `xcrun simctl`.
 //  - Video, touch, keys, buttons, the accessibility tree and the foreground
-//    app: one `serve-sim` helper per booted simulator, run as OUR child
-//    process on 127.0.0.1 (never `--allow-exec`). Apple publishes no tap or
-//    streaming API; the helper drives SimulatorKit privately, and a native
-//    hang or crash in it must not take the server down (loading its addon
-//    in-process hung Node's main thread, docs/devices §10.1).
+//    app: one `serve-sim` helper per booted simulator, run in the foreground
+//    as a process of OUR own on 127.0.0.1 (never `--allow-exec`). Apple
+//    publishes no tap or streaming API; the helper drives SimulatorKit
+//    privately, and a native hang or crash in it must not take the server
+//    down. Neither in-process form works: on the main thread its addon hung
+//    Node, and in a worker its capture threads outlive `terminate()` and
+//    crash the process (docs/devices §10.1). The desktop app's server cannot
+//    run a script with its own binary (the RunAsNode fuse is off), so how the
+//    process starts is the `launchScript` option's business.
 //
 // The helper is reached only by this process; nothing is exposed to clients
 // except through the server's authenticated device routes.
 // ────────────────────────────────────────────────────────────────
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import type { DeviceInputEvent, DeviceToolingStatus, ILogger } from '@generatorai/shared';
@@ -32,19 +36,50 @@ import { HID_NAMED_KEYS, HID_SHIFT, hidStrokesFor } from './hidKeys.js';
 import { parseIosAccessibility } from './iosAccessibility.js';
 import { runBytes, runText } from './run.js';
 
+/** A Node script running as a process of its own. */
+export interface ScriptProcess {
+  /** Called once, when the process is gone (null code: killed or never started). */
+  onExit(listener: (code: number | null) => void): void;
+  kill(): void;
+}
+
+/** Starts a Node script as a separate process. */
+export type ScriptLauncher = (script: string, args: string[]) => ScriptProcess;
+
+/** The default launcher: the current Node runs the script (a plain Node server). */
+export const spawnNodeScript: ScriptLauncher = (script, args) => {
+  const child = spawn(process.execPath, [script, ...args], { stdio: 'ignore', windowsHide: true });
+  let exited = false;
+  const listeners: ((code: number | null) => void)[] = [];
+  const finish = (code: number | null) => {
+    if (exited) return;
+    exited = true;
+    for (const l of listeners) l(code);
+  };
+  child.once('exit', (code) => finish(code));
+  child.once('error', () => finish(null));
+  return {
+    onExit: (listener) => {
+      if (exited) listener(child.exitCode);
+      else listeners.push(listener);
+    },
+    kill: () => {
+      if (!exited) child.kill('SIGTERM');
+    },
+  };
+};
+
 export interface IosSimulatorBridgeOptions {
   logger: ILogger;
   /** `serve-sim/dist/serve-sim.js`, or null when the package is not installed. */
   serveSimCli: string | null;
-  /** The Node runtime that runs it (the server's own `process.execPath`). */
-  nodePath?: string;
+  /** How the helper script starts; {@link spawnNodeScript} by default. */
+  launchScript?: ScriptLauncher;
 }
 
 interface Helper {
-  child: ChildProcess;
+  process: ScriptProcess;
   base: string;
-  /** Another serve-sim already served this simulator; ours reused it and exited. Never killed by us. */
-  reused: boolean;
   ws: WebSocket | null;
   wsReady: Promise<WebSocket> | null;
 }
@@ -210,50 +245,43 @@ export class IosSimulatorBridge implements IDeviceBridge {
     }
     if (process.arch !== 'arm64') throw new Error('The simulator live view and input need an Apple-silicon Mac.');
     const port = await freePort();
-    const child = spawn(this.options.nodePath ?? process.execPath, [cli, '--no-preview', '-q', '-p', String(port), udid], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    // Foreground mode: the helper serves this one simulator until we stop it
+    // (or the simulator shuts down) — no detached daemon to track or `--kill`.
+    const proc = (this.options.launchScript ?? spawnNodeScript)(cli, [
+      udid,
+      '--port',
+      String(port),
+      '--host',
+      '127.0.0.1',
+      '--exit-on-simulator-shutdown',
+      '-q',
+    ]);
+    let exitCode: number | null | undefined;
+    proc.onExit((code) => {
+      exitCode = code;
     });
-    const base = await new Promise<string>((resolve, reject) => {
-      let out = '';
-      let err = '';
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL');
-        reject(new Error(`The simulator helper did not start: ${err.trim().split('\n').slice(-3).join(' ') || 'no output'}`));
-      }, 30_000);
-      child.stdout?.on('data', (d: Buffer) => {
-        out += d.toString('utf8');
-        const line = out.split('\n').find((l) => l.trim().startsWith('{'));
-        if (!line) return;
-        try {
-          const info = JSON.parse(line) as { url?: string };
-          if (!info.url) return;
-          clearTimeout(timer);
-          resolve(`${info.url}/helper/${udid}`);
-        } catch {
-          // a partial line; wait for more
-        }
-      });
-      child.stderr?.on('data', (d: Buffer) => {
-        err += d.toString('utf8');
-        if (err.length > 8000) err = err.slice(-4000);
-      });
-      child.once('exit', (code) => {
-        clearTimeout(timer);
-        reject(new Error(`The simulator helper exited (${code}): ${err.trim().split('\n').slice(-3).join(' ')}`));
-      });
-    });
-    if (!/^http:\/\/127\.0\.0\.1:\d+\//.test(base)) {
-      child.kill('SIGKILL');
-      throw new Error('The simulator helper bound an unexpected address.');
+    const base = `http://127.0.0.1:${port}/helper/${udid}`;
+    // Ready once it reports the simulator's framebuffer (0×0 until capture starts).
+    const deadline = Date.now() + 45_000;
+    for (;;) {
+      if (exitCode !== undefined) throw new Error(`The simulator helper exited (${exitCode ?? 'killed'}) before it was ready.`);
+      const config = await fetch(`${base}/config`, { signal: AbortSignal.timeout(3000) })
+        .then((r) => (r.ok ? (r.json() as Promise<{ width?: number }>) : null))
+        .catch(() => null);
+      if (config && (config.width ?? 0) > 0) break;
+      if (Date.now() > deadline) {
+        proc.kill();
+        throw new Error('The simulator helper did not start within 45 s.');
+      }
+      await new Promise((r) => setTimeout(r, 300));
     }
-    // A helper already serving this simulator (another app, a terminal) makes
-    // ours print that helper's address and exit 0: keep using the address. Any
-    // other exit means the helper is gone.
-    const helper: Helper = { child, base, reused: false, ws: null, wsReady: null };
-    child.once('exit', (code) => {
-      if (code === 0) helper.reused = true;
-      else this.helpers.delete(udid);
+    const helper: Helper = { process: proc, base, ws: null, wsReady: null };
+    // The map holds this start's promise; a later helper for the same simulator must not be dropped by this exit.
+    const entry = this.helpers.get(udid);
+    proc.onExit((code) => {
+      // Gone (the simulator shut down, or it crashed): the next call starts a fresh one.
+      if (this.helpers.get(udid) === entry) this.helpers.delete(udid);
+      this.options.logger.info?.(`[devices] simulator helper for ${udid} exited (${code ?? 'killed'})`);
     });
     this.options.logger.info?.(`[devices] simulator helper for ${udid} on ${base}`);
     return helper;
@@ -264,21 +292,7 @@ export class IosSimulatorBridge implements IDeviceBridge {
     this.helpers.delete(udid);
     const helper = await pending?.catch(() => null);
     helper?.ws?.close();
-    if (helper && helper.child.exitCode === null) {
-      helper.child.kill('SIGTERM');
-      setTimeout(() => {
-        if (helper.child.exitCode === null) helper.child.kill('SIGKILL');
-      }, 2000).unref();
-    }
-    // `--no-preview` hands the device to a detached helper daemon of its own;
-    // only serve-sim's `--kill` reaches it.
-    const cli = this.options.serveSimCli;
-    if (cli && helper && !helper.reused) {
-      await runText(this.options.nodePath ?? process.execPath, [cli, '--kill', udid], {
-        timeoutMs: 15_000,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-      }).catch(() => undefined);
-    }
+    helper?.process.kill();
   }
 
   private async get(udid: string, route: string, timeoutMs = 20_000): Promise<Response> {
@@ -287,7 +301,7 @@ export class IosSimulatorBridge implements IDeviceBridge {
     try {
       res = await fetch(`${helper.base}/${route}`, { signal: AbortSignal.timeout(timeoutMs) });
     } catch (err) {
-      // Unreachable (the helper we reused went away): start a fresh one next time.
+      // Unreachable (the helper went away): start a fresh one next time.
       if ((err as Error).name !== 'TimeoutError') this.helpers.delete(udid);
       throw err;
     }

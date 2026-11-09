@@ -15,6 +15,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { UtilityProcess } from 'electron';
+import type { HelperProcess } from './node-helpers';
 
 export interface ServerChild {
   readonly kind: 'utility' | 'node';
@@ -137,4 +138,11 @@ function defaultFork(modulePath: string, args: string[], options: object): Utili
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { utilityProcess } = require('electron') as { utilityProcess: { fork: (m: string, a: string[], o: object) => UtilityProcess } };
   return utilityProcess.fork(modulePath, args, options) as unknown as UtilityProcessLike;
+}
+
+/** A helper script the server asked for, in a utility process of its own (node-helpers.ts). */
+export function forkHelperScript(script: string, args: string[]): HelperProcess {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { utilityProcess } = require('electron') as { utilityProcess: { fork: (m: string, a: string[], o: object) => UtilityProcess } };
+  return utilityProcess.fork(script, args, { stdio: 'ignore', serviceName: 'GeneratorAI Helper' }) as unknown as HelperProcess;
 }

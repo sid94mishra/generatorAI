@@ -27,6 +27,7 @@ import { loadOrCreateCallbackKey } from './composition/callbackKey.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
 import { resolveScrcpyServer, resolveServeSimCli } from './devices/deviceResources.js';
+import { scriptLauncher } from './devices/scriptLauncher.js';
 import { readDevicePreferences } from './settings/devices.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
@@ -2021,7 +2022,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     logger,
     [
       new AndroidBridge({ logger, sdkPath: () => androidSdkPath || null, scrcpyServerPath: await resolveScrcpyServer() }),
-      new IosSimulatorBridge({ logger, serveSimCli: await resolveServeSimCli() }),
+      new IosSimulatorBridge({ logger, serveSimCli: await resolveServeSimCli(), launchScript: scriptLauncher() }),
     ],
     { enabled: devicePrefs.enabled },
   );
