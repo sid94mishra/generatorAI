@@ -53,6 +53,7 @@ import type {
   ForkConversationOptions,
   ForkConversationResult,
   RewindConversationOptions,
+  CompactConversationOptions,
   HarnessClientState,
   HarnessClientEvent,
   HarnessModel,
@@ -66,8 +67,8 @@ import type {
   McpServerConfig,
   PermissionRequest,
 } from '@generatorai/core';
-import type { AgentEvent, AgentQuestion } from '@generatorai/shared';
-import { HarnessSessionError } from '@generatorai/shared';
+import type { AgentEvent, AgentQuestion, CompactionTrigger } from '@generatorai/shared';
+import { COMPACTION_INFO, HarnessSessionError, describeCompaction } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
 import { dropOptionalNulls, toStrictSchema } from './strictSchema.js';
 import type { CodexProviderOptions } from '../../types.js';
@@ -85,6 +86,7 @@ import type {
   V2ModelListResponse,
   V2ReasoningSummaryTextDeltaNotification,
   V2ReasoningTextDeltaNotification,
+  V2ThreadTokenUsage,
   V2ThreadTokenUsageUpdatedNotification,
   V2TurnStartedNotification,
   V2SandboxMode,
@@ -237,10 +239,26 @@ interface ConversationState {
   fileChangePaths: Map<string, Array<{ path: string; kind?: string }>>;
   /** The last turn ran in the plan-mode read-only sandbox; see `sandboxPolicyForTurn`. */
   sandboxNarrowedForPlan?: boolean;
+  /**
+   * Compactions already announced, by turn id: Codex reports one through both the deprecated `thread/compacted`
+   * and the `contextCompaction` item, and a compaction may happen in a turn of ours, in one we started with
+   * `thread/compact/start`, or with no turn of ours running at all — each is announced once, whichever handler
+   * sees it first.
+   */
+  compactionsStarted: Set<string>;
+  compactionsDone: Set<string>;
+  /** Tokens the most recent request occupied (`thread/tokenUsage/updated`): a compaction's "before". */
+  lastContextTokens?: number;
 }
 
 /** How many finished turn ids to remember per conversation. */
 const RETIRED_TURN_MEMORY = 32;
+
+/**
+ * Codex has no switch for automatic compaction, only the token count it starts at
+ * (`model_auto_compact_token_limit`). "Off" is a count no context window reaches.
+ */
+const CODEX_NEVER_AUTO_COMPACT = Number.MAX_SAFE_INTEGER;
 
 // ── Errors ───────────────────────────────────────────────────────
 
@@ -785,6 +803,8 @@ export class CodexProvider implements IAgentHarness {
   private rateLimits: V2RateLimitSnapshot | undefined;
   /** Unsubscribe for the provider-level notification handler. */
   private globalNotificationUnsub: UnsubFn | null = null;
+  /** Context window per model, as `thread/tokenUsage/updated` reported it (for the auto-compact threshold). */
+  private readonly contextWindows = new Map<string, number>();
 
   constructor(opts: CodexProviderOptions = {}) {
     this.opts = {
@@ -1020,6 +1040,9 @@ export class CodexProvider implements IAgentHarness {
       // in the protocol (0.162; `thread/rollback` is gone).
       conversationFork: true,
       conversationRewind: true,
+      // `thread/compact/start {threadId}`: no instructions (only the config-wide `compact_prompt`).
+      conversationCompact: true,
+      compactInstructions: false,
       // `account/login/start` (ChatGPT browser flow) + `account/logout`.
       accountLogin: true,
       budgetTracking: false,
@@ -1234,6 +1257,8 @@ export class CodexProvider implements IAgentHarness {
       retiredTurns: new Set(),
       turnCommandItems: new Set(),
       fileChangePaths: new Map(),
+      compactionsStarted: new Set(),
+      compactionsDone: new Set(),
     });
     await this.syncSkillRoots();
     return params.conversationId;
@@ -1350,10 +1375,40 @@ export class CodexProvider implements IAgentHarness {
     // Claude's AskUserQuestion is (verified against codex 0.162).
     if (params.onQuestionRequest) features['default_mode_request_user_input'] = true;
     if (Object.keys(features).length) config['features'] = features;
+    const autoCompactLimit = this.autoCompactLimit(params, warnings);
+    if (autoCompactLimit !== undefined) config['model_auto_compact_token_limit'] = autoCompactLimit;
     return {
       ...this.buildInstructions(params, warnings),
       ...(Object.keys(config).length ? { config } : {}),
     };
+  }
+
+  /**
+   * The app's auto-compaction setting as Codex's one knob, `model_auto_compact_token_limit` (a token count). A
+   * percentage needs the model's context window, which Codex reports only in `thread/tokenUsage/updated`: known
+   * once any thread has run a turn on that model, so the first chat on a model after a restart keeps Codex's own
+   * threshold and says so.
+   */
+  private autoCompactLimit(params: CreateConversationParams, warnings: ConversationWarning[]): number | undefined {
+    const setting = params.autoCompact;
+    if (!setting) return undefined;
+    if (!setting.enabled) return CODEX_NEVER_AUTO_COMPACT;
+    if (setting.thresholdPct == null) return undefined;
+    const model = params.model ?? this.opts.defaultModel;
+    const window = model ? this.contextWindows.get(model) : undefined;
+    if (!window) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: {
+          field: 'autoCompact.thresholdPct',
+          provider: 'codex',
+          reason: "Codex reports the model's context window only after its first turn; its own threshold applies until then",
+        },
+      });
+      return undefined;
+    }
+    const pct = Math.min(99, Math.max(1, setting.thresholdPct));
+    return Math.floor((window * pct) / 100);
   }
 
   /**
@@ -1703,22 +1758,230 @@ export class CodexProvider implements IAgentHarness {
     try {
       return await this.doTurn(conv, prompt, attachments, signal, options);
     } finally {
-      // Retire BEFORE clearing, so a terminal event still owed by this turn is
-      // recognised as stale rather than attributed to whatever runs next.
-      if (conv.activeTurnId) {
-        conv.retiredTurns.add(conv.activeTurnId);
-        while (conv.retiredTurns.size > RETIRED_TURN_MEMORY) {
-          const oldest = conv.retiredTurns.values().next().value as string | undefined;
-          if (oldest === undefined) break;
-          conv.retiredTurns.delete(oldest);
-        }
-      }
-      conv.inFlight = false;
-      conv.settleTurn = null;
-      conv.failTurn = null;
-      conv.activeTurnId = null;
-      conv.cancelRequested = false;
+      this.releaseTurn(conv);
     }
+  }
+
+  /** The end of every awaited turn (a prompt or a compaction): the conversation takes the next one. */
+  private releaseTurn(conv: ConversationState): void {
+    // Retire BEFORE clearing, so a terminal event still owed by this turn is
+    // recognised as stale rather than attributed to whatever runs next.
+    if (conv.activeTurnId) {
+      conv.retiredTurns.add(conv.activeTurnId);
+      while (conv.retiredTurns.size > RETIRED_TURN_MEMORY) {
+        const oldest = conv.retiredTurns.values().next().value as string | undefined;
+        if (oldest === undefined) break;
+        conv.retiredTurns.delete(oldest);
+      }
+    }
+    conv.inFlight = false;
+    conv.settleTurn = null;
+    conv.failTurn = null;
+    conv.activeTurnId = null;
+    conv.cancelRequested = false;
+  }
+
+  /**
+   * `thread/compact/start`: Codex answers `{}` at once and runs the compaction as a turn of its own (kind
+   * `compact`) — `turn/started`, a `contextCompaction` item, `turn/completed`. No prompt of ours is waiting on that
+   * turn, so it is followed here, and ends the way a turn does (`harness.idle`) for the caller listening.
+   */
+  async compactConversation(conversationId: string, _options?: CompactConversationOptions): Promise<void> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) throw new Error(`CodexProvider: no conversation "${conversationId}"`);
+    if (conv.inFlight) throw new Error(`CodexProvider: conversation "${conversationId}" already has a turn in flight`);
+    conv.inFlight = true;
+    conv.cancelRequested = false;
+    try {
+      await this.runCompaction(conv);
+    } finally {
+      this.releaseTurn(conv);
+    }
+  }
+
+  private runCompaction(conv: ConversationState): Promise<void> {
+    if (conv.activeTurnId) {
+      conv.retiredTurns.add(conv.activeTurnId);
+      conv.activeTurnId = null;
+    }
+    const model = conv.params.model ?? this.opts.defaultModel ?? '';
+    const preTokens = conv.lastContextTokens;
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let unsub: UnsubFn = () => { /* not subscribed yet */ };
+      /** Turn id of the compaction once Codex announced it; `compact` until then. */
+      let turnKey = 'compact';
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        conv.settleTurn = null;
+        conv.failTurn = null;
+        unsub();
+        fn();
+      };
+      const fail = (message: string): void => {
+        finish(() => {
+          this.broadcast(conv, {
+            kind: 'harness.session_info',
+            data: { infoType: COMPACTION_INFO.failed, message: `Compaction failed: ${message}`, trigger: 'manual', error: message, provider: 'codex' },
+          });
+          this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'codex' } });
+          this.broadcast(conv, { kind: 'harness.idle', data: {} });
+          reject(new Error(message));
+        });
+      };
+      conv.failTurn = fail;
+      conv.settleTurn = (): void => {
+        conv.cancelRequested = true;
+        finish(() => {
+          this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'codex' } });
+          resolve();
+        });
+      };
+
+      unsub = this.onNotification((method, params) => {
+        const p = params as Record<string, unknown> | undefined;
+        if (!p || p['threadId'] !== conv.threadId) return;
+        const turnId = typeof p['turnId'] === 'string' ? p['turnId'] : undefined;
+        if (turnId && (conv.retiredTurns.has(turnId) || (conv.activeTurnId && turnId !== conv.activeTurnId))) return;
+        switch (method) {
+          case 'turn/started': {
+            const id = (params as V2TurnStartedNotification).turn?.id;
+            if (!id || conv.retiredTurns.has(id)) break;
+            conv.activeTurnId ??= id;
+            turnKey = conv.activeTurnId;
+            if (conv.cancelRequested) void this.interruptActiveTurn(conv);
+            this.announceCompactionStart(conv, turnKey, 'manual');
+            break;
+          }
+          case 'item/started': {
+            if ((params as V2ItemStartedNotification).item?.type === 'contextCompaction') {
+              this.announceCompactionStart(conv, turnId ?? turnKey, 'manual');
+            }
+            break;
+          }
+          case 'item/completed': {
+            if ((params as V2ItemCompletedNotification).item?.type === 'contextCompaction') {
+              this.announceCompaction(conv, turnId ?? turnKey, 'manual', preTokens);
+            }
+            break;
+          }
+          case 'thread/compacted':
+            this.announceCompaction(conv, (params as V2ContextCompactedNotification).turnId, 'manual', preTokens);
+            break;
+          case 'thread/tokenUsage/updated': {
+            const usage = (params as V2ThreadTokenUsageUpdatedNotification).tokenUsage;
+            if (usage) this.broadcast(conv, this.contextUsageEvent(conv, usage, model));
+            break;
+          }
+          case 'error': {
+            const notif = params as V2ErrorNotification;
+            if (notif.willRetry) break;
+            fail(notif.error?.message ?? 'Codex could not compact the conversation');
+            break;
+          }
+          case 'turn/completed': {
+            const turn: V2Turn | undefined = (params as V2TurnCompletedNotification).turn;
+            if (turn?.id && (conv.retiredTurns.has(turn.id) || (conv.activeTurnId && turn.id !== conv.activeTurnId))) break;
+            if (turn?.status === 'interrupted') {
+              finish(() => {
+                this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'codex' } });
+                resolve();
+              });
+              break;
+            }
+            if (turn?.status === 'failed') {
+              fail(turn.error?.message ?? 'Codex could not compact the conversation');
+              break;
+            }
+            finish(() => {
+              // A finished compact turn compacted, whether or not the item form was sent.
+              this.announceCompaction(conv, turn?.id ?? turnKey, 'manual', preTokens);
+              if (turn?.id) this.broadcast(conv, { kind: 'harness.turn_end', data: { turnId: turn.id, providerTurnId: turn.id } });
+              this.broadcast(conv, { kind: 'harness.idle', data: {} });
+              resolve();
+            });
+            break;
+          }
+          default:
+            break;
+        }
+      });
+
+      if (conv.cancelRequested) {
+        conv.settleTurn();
+        return;
+      }
+      this.rpc('thread/compact/start', { threadId: conv.threadId }).catch((err: unknown) => {
+        fail(err instanceof Error ? err.message : String(err));
+      });
+    });
+  }
+
+  /** `compaction_start`, once per compaction. */
+  private announceCompactionStart(conv: ConversationState, turnKey: string, trigger: CompactionTrigger): void {
+    if (conv.compactionsStarted.has(turnKey) || conv.compactionsDone.has(turnKey)) return;
+    conv.compactionsStarted.add(turnKey);
+    this.broadcast(conv, {
+      kind: 'harness.session_info',
+      data: { infoType: COMPACTION_INFO.start, message: 'Compacting conversation…', trigger, provider: 'codex' },
+    });
+  }
+
+  /**
+   * `compact_boundary`, once per compaction. Codex reports no token counts with it: the "before" is what the last
+   * request occupied, and the gauge follows from the next `thread/tokenUsage/updated`.
+   */
+  private announceCompaction(conv: ConversationState, turnKey: string, trigger: CompactionTrigger, preTokens?: number): void {
+    if (conv.compactionsDone.has(turnKey)) return;
+    conv.compactionsDone.add(turnKey);
+    for (const set of [conv.compactionsStarted, conv.compactionsDone]) {
+      while (set.size > RETIRED_TURN_MEMORY) {
+        const oldest = set.values().next().value as string | undefined;
+        if (oldest === undefined) break;
+        set.delete(oldest);
+      }
+    }
+    const before = preTokens ?? conv.lastContextTokens;
+    this.broadcast(conv, {
+      kind: 'harness.session_info',
+      data: {
+        infoType: COMPACTION_INFO.boundary,
+        message: describeCompaction({ trigger, ...(before != null ? { preTokens: before } : {}) }),
+        trigger,
+        ...(before != null ? { preTokens: before } : {}),
+        provider: 'codex',
+      },
+    });
+  }
+
+  /** `thread/tokenUsage/updated` as the context gauge sees it; remembers the fill and the model's window. */
+  private contextUsageEvent(conv: ConversationState, usage: V2ThreadTokenUsage, model: string): AgentEvent {
+    conv.lastContextTokens = usage.last.inputTokens + usage.last.outputTokens;
+    if (model && usage.modelContextWindow) this.contextWindows.set(model, usage.modelContextWindow);
+    return {
+      kind: 'harness.context_usage',
+      data: {
+        provider: 'codex',
+        ...(model ? { model } : {}),
+        source: 'provider',
+        // What the most recent request actually occupied.
+        currentTokens: usage.last.inputTokens + usage.last.outputTokens,
+        ...(usage.modelContextWindow ? { totalContextWindow: usage.modelContextWindow, promptTokenLimit: usage.modelContextWindow } : {}),
+        // The same request the total describes, split the way the
+        // gauge shows it. Codex counts cached tokens INSIDE
+        // `inputTokens` (the OpenAI convention), so the uncached part
+        // is the difference — and input + cache read + output adds up
+        // to the figure above them. Without this the Codex popover had
+        // no token rows at all: a percentage, and nothing behind it.
+        apiUsage: {
+          input: Math.max(0, usage.last.inputTokens - (usage.last.cachedInputTokens ?? 0)),
+          cacheRead: usage.last.cachedInputTokens ?? 0,
+          ...(usage.last.cacheWriteInputTokens ? { cacheWrite: usage.last.cacheWriteInputTokens } : {}),
+          output: usage.last.outputTokens,
+        },
+      },
+    };
   }
 
   /**
@@ -1817,8 +2080,6 @@ export class CodexProvider implements IAgentHarness {
     const reasoningKind = new Map<string, 'summary' | 'raw'>();
     /** Streamed `plan` item text, accumulated until the item completes. */
     const planText = new Map<string, string>();
-    /** Turn ids already announced as compacted — the notice must not repeat. */
-    const compactedTurns = new Set<string>();
     /** Token usage: thread totals when this turn began, and the latest report. */
     let usageAtStart: { input: number; output: number; cached: number } | null = null;
     let usageLatest: { input: number; output: number; cached: number } | null = null;
@@ -2136,17 +2397,12 @@ export class CodexProvider implements IAgentHarness {
 
           // ── Compaction ──────────────────────────────────────────
           //
-          // `compact_boundary` is the infoType the Claude mapper already emits
-          // for its own `SDKCompactBoundaryMessage`, so a Codex compaction
-          // renders through the same path rather than needing new UI.
+          // Inside a turn of ours a compaction is Codex's own (its window
+          // filled up): the shared `compact_boundary` with trigger `auto`, so
+          // it renders through the same path as every provider's.
           case 'thread/compacted': {
             const notif = params as V2ContextCompactedNotification;
-            if (compactedTurns.has(notif.turnId)) break;
-            compactedTurns.add(notif.turnId);
-            this.broadcast(conv, {
-              kind: 'harness.session_info',
-              data: { infoType: 'compact_boundary', message: 'Context compacted (auto)', provider: 'codex' },
-            });
+            this.announceCompaction(conv, notif.turnId, 'auto');
             break;
           }
 
@@ -2210,29 +2466,7 @@ export class CodexProvider implements IAgentHarness {
               cached: total.cached - (usage.last.cachedInputTokens ?? 0),
             };
             usageLatest = total;
-            this.broadcast(conv, {
-              kind: 'harness.context_usage',
-              data: {
-                provider: 'codex',
-                ...(model ? { model } : {}),
-                source: 'provider',
-                // What the most recent request actually occupied.
-                currentTokens: usage.last.inputTokens + usage.last.outputTokens,
-                ...(usage.modelContextWindow ? { totalContextWindow: usage.modelContextWindow, promptTokenLimit: usage.modelContextWindow } : {}),
-                // The same request the total describes, split the way the
-                // gauge shows it. Codex counts cached tokens INSIDE
-                // `inputTokens` (the OpenAI convention), so the uncached part
-                // is the difference — and input + cache read + output adds up
-                // to the figure above them. Without this the Codex popover had
-                // no token rows at all: a percentage, and nothing behind it.
-                apiUsage: {
-                  input: Math.max(0, usage.last.inputTokens - (usage.last.cachedInputTokens ?? 0)),
-                  cacheRead: usage.last.cachedInputTokens ?? 0,
-                  ...(usage.last.cacheWriteInputTokens ? { cacheWrite: usage.last.cacheWriteInputTokens } : {}),
-                  output: usage.last.outputTokens,
-                },
-              },
-            });
+            this.broadcast(conv, this.contextUsageEvent(conv, usage, model));
             break;
           }
 
@@ -2240,6 +2474,10 @@ export class CodexProvider implements IAgentHarness {
             const item = (params as V2ItemStartedNotification).item;
             if (item?.type === 'subAgentActivity') {
               emitSubAgentActivity(item);
+              break;
+            }
+            if (item?.type === 'contextCompaction') {
+              this.announceCompactionStart(conv, typeof turnId === 'string' ? turnId : item.id, 'auto');
               break;
             }
             if (item && TOOL_ITEM_TYPES.has(item.type)) {
@@ -2290,15 +2528,8 @@ export class CodexProvider implements IAgentHarness {
               if (steps.length) emitPlanUpdate(steps);
               break;
             } else if (item.type === 'contextCompaction') {
-              // The item form of `thread/compacted`; one notice either way.
-              const turnKey = conv.activeTurnId ?? item.id;
-              if (!compactedTurns.has(turnKey)) {
-                compactedTurns.add(turnKey);
-                this.broadcast(conv, {
-                  kind: 'harness.session_info',
-                  data: { infoType: 'compact_boundary', message: 'Context compacted (auto)', provider: 'codex' },
-                });
-              }
+              // The item form of `thread/compacted`; one notice either way (both are keyed by the turn).
+              this.announceCompaction(conv, typeof turnId === 'string' ? turnId : item.id, 'auto');
               break;
             } else if (item.type === 'reasoning') {
               const streamed = reasoningText.get(item.id) ?? '';
@@ -2735,6 +2966,31 @@ export class CodexProvider implements IAgentHarness {
       case 'thread/closed': {
         const conv = this.convForThread((params as V2ThreadClosedNotification).threadId);
         conv?.failTurn?.('The Codex thread was closed before the turn finished.');
+        return;
+      }
+
+      // A compaction while no turn of ours is running (Codex compacting a thread on its own between turns): no
+      // turn handler is subscribed, so it is announced here — and only then, never twice.
+      case 'thread/compacted':
+      case 'item/started':
+      case 'item/completed':
+      case 'thread/tokenUsage/updated': {
+        const conv = this.convForThread(p['threadId']);
+        if (!conv || conv.inFlight) return;
+        const turnId = typeof p['turnId'] === 'string' ? p['turnId'] : undefined;
+        if (method === 'thread/tokenUsage/updated') {
+          const usage = (params as V2ThreadTokenUsageUpdatedNotification).tokenUsage;
+          if (usage) this.broadcast(conv, this.contextUsageEvent(conv, usage, conv.params.model ?? this.opts.defaultModel ?? ''));
+          return;
+        }
+        if (method === 'thread/compacted') {
+          this.announceCompaction(conv, (params as V2ContextCompactedNotification).turnId, 'auto');
+          return;
+        }
+        const item = (params as V2ItemStartedNotification | V2ItemCompletedNotification).item;
+        if (item?.type !== 'contextCompaction') return;
+        if (method === 'item/started') this.announceCompactionStart(conv, turnId ?? item.id, 'auto');
+        else this.announceCompaction(conv, turnId ?? item.id, 'auto');
         return;
       }
 

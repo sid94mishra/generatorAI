@@ -81,6 +81,15 @@
 //                      nothing at all (only the client can settle the turn)
 //   "REASON_PARTS"   → two reasoning summary parts separated by
 //                      item/reasoning/summaryPartAdded
+//   "AUTO_COMPACT"   → token usage, then Codex's own compaction mid-turn
+//                      (contextCompaction item started/completed plus the
+//                      deprecated thread/compacted), then the answer
+//
+// `thread/compact/start` answers {} and then runs a compact turn the way the
+// real server does: turn/started, a contextCompaction item, a token usage
+// report, turn/completed. FAKE_CODEX_COMPACT_FAIL=1 ends it `failed`.
+// `__test/compactIdle {threadId}` makes Codex compact the thread with no turn
+// of the client's running (the item and thread/compacted, no turn/*).
 //   anything else    → an agent-message delta, then turn/completed
 //
 // FAKE_CODEX_RATE_LIMITS=1  answer `account/rateLimits/read` with a snapshot
@@ -116,6 +125,7 @@ const WANT_APPROVAL = process.env['FAKE_CODEX_APPROVAL'] === '1';
 const SKIP_HANDSHAKE = process.env['FAKE_CODEX_SKIP_HANDSHAKE'] === '1';
 const RATE_LIMITS_READ = process.env['FAKE_CODEX_RATE_LIMITS'] === '1';
 const MCP_STATUS = process.env['FAKE_CODEX_MCP_STATUS'] ?? '';
+const COMPACT_FAIL = process.env['FAKE_CODEX_COMPACT_FAIL'] === '1';
 
 if (process.env['FAKE_CODEX_STDERR']) process.stderr.write(process.env['FAKE_CODEX_STDERR']);
 if (process.env['FAKE_CODEX_IGNORE_SIGTERM'] === '1') process.on('SIGTERM', () => { /* deliberately deaf */ });
@@ -179,6 +189,31 @@ function commandItem(id, status, exitCode, output) {
     exitCode,
     durationMs: 1,
   };
+}
+
+function usageOf(input, output) {
+  const b = { inputTokens: input, cachedInputTokens: 0, outputTokens: output, reasoningOutputTokens: 0, totalTokens: input + output };
+  return { last: b, total: b, modelContextWindow: 200_000 };
+}
+
+/** A compact turn as `thread/compact/start` runs it. */
+function runCompactTurn(threadId) {
+  const turnId = `turn_${++turnCount}`;
+  running.set(threadId, { turnId });
+  notify('turn/started', {
+    threadId,
+    turn: { id: turnId, items: [], itemsView: 'complete', status: 'inProgress', error: null, startedAt: 0, completedAt: null, durationMs: null },
+  });
+  const cid = nextItemId();
+  notify('item/started', { threadId, turnId, startedAtMs: 1, item: { type: 'contextCompaction', id: cid } });
+  if (COMPACT_FAIL) {
+    endTurn(threadId, turnId, 'failed', { message: 'summary request failed', codexErrorInfo: null, additionalDetails: null });
+    return;
+  }
+  notify('item/completed', { threadId, turnId, completedAtMs: 2, item: { type: 'contextCompaction', id: cid } });
+  notify('thread/compacted', { threadId, turnId });
+  notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: usageOf(150_000, 3_000) });
+  endTurn(threadId, turnId, 'completed');
 }
 
 function endTurn(threadId, turnId, status, error) {
@@ -533,6 +568,19 @@ async function runTurn(threadId, turnId, prompt, turnStartParams) {
     return;
   }
 
+  if (prompt.includes('AUTO_COMPACT')) {
+    notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: usageOf(180_000, 2_000) });
+    const cid = nextItemId();
+    notify('item/started', { threadId, turnId, startedAtMs: 1, item: { type: 'contextCompaction', id: cid } });
+    notify('item/completed', { threadId, turnId, completedAtMs: 2, item: { type: 'contextCompaction', id: cid } });
+    notify('thread/compacted', { threadId, turnId });
+    const msg = nextItemId();
+    notify('item/agentMessage/delta', { threadId, turnId, itemId: msg, delta: 'after compaction' });
+    notify('item/completed', { threadId, turnId, completedAtMs: 3, item: agentMessageItem(msg, 'after compaction') });
+    endTurn(threadId, turnId, 'completed');
+    return;
+  }
+
   if (prompt.includes('ECHO_PARAMS')) {
     const msg = nextItemId();
     const text = JSON.stringify({
@@ -722,6 +770,23 @@ rl.on('line', (line) => {
       // Deferred so the `turn/start` RESPONSE is written before any of the
       // turn's notifications — the provider learns the turn id from it.
       setImmediate(() => { void runTurn(threadId, turnId, text, params ?? null); });
+      return;
+    }
+
+    case 'thread/compact/start': {
+      respond(id, {});
+      setImmediate(() => runCompactTurn(params?.threadId));
+      return;
+    }
+
+    case '__test/compactIdle': {
+      respond(id, {});
+      const threadId = params?.threadId;
+      const turnId = `turn_${++turnCount}`;
+      const cid = nextItemId();
+      notify('item/started', { threadId, turnId, startedAtMs: 1, item: { type: 'contextCompaction', id: cid } });
+      notify('item/completed', { threadId, turnId, completedAtMs: 2, item: { type: 'contextCompaction', id: cid } });
+      notify('thread/compacted', { threadId, turnId });
       return;
     }
 
