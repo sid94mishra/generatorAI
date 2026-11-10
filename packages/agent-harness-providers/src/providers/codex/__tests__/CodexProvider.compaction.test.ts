@@ -184,4 +184,27 @@ describe('CodexProvider — the auto-compact setting', () => {
     await p.resumeConversation('chg', CONV('chg', { autoCompact: { enabled: false } }));
     expect((await threadConfig(p, 'chg'))['model_auto_compact_token_limit']).toBe(Number.MAX_SAFE_INTEGER);
   }, 20_000);
+
+  it('a listener unsubscribed after a reopen stops hearing the thread, and the next compaction keeps its size', async () => {
+    const p = await started();
+    await p.createConversation(CONV('re', { autoCompact: { enabled: true } }));
+    await p.sendPromptAndWait('re', 'AUTO_COMPACT');
+    // A long-lived watcher (the chat service's compaction watch) subscribes, the setting changes twice, and it
+    // re-subscribes each time — as sendPrompt does.
+    let calls = 0;
+    let unsub = p.onConversationEvent('re', () => { calls++; });
+    for (const enabled of [false, true]) {
+      await p.resumeConversation('re', CONV('re', { autoCompact: { enabled } }));
+      unsub();
+      unsub = p.onConversationEvent('re', () => { calls++; });
+    }
+    const events = collect(p, 're');
+    calls = 0;
+    await p.compactConversation!('re');
+    const boundaries = events.filter((e) => info(e)?.['infoType'] === COMPACTION_INFO.boundary);
+    expect(boundaries).toHaveLength(1);
+    // One watcher, once per event — not once per reopen.
+    expect(calls).toBe(events.length);
+    expect(info(boundaries[0]!)?.['preTokens']).toBe(182_000);
+  }, 20_000);
 });

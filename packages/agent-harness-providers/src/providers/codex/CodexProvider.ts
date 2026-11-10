@@ -1539,7 +1539,10 @@ export class CodexProvider implements IAgentHarness {
       throw err;
     }
     const next = this.conversations.get(conversationId);
-    if (next) for (const l of live.listeners) next.listeners.add(l);
+    if (!next) return;
+    for (const l of live.listeners) next.listeners.add(l);
+    // Same thread, same history: what it last occupied is still the "before" of its next compaction.
+    if (live.lastContextTokens !== undefined) next.lastContextTokens ??= live.lastContextTokens;
   }
 
   async listConversations(): Promise<string[]> {
@@ -2886,7 +2889,13 @@ export class CodexProvider implements IAgentHarness {
     const conv = this.conversations.get(conversationId);
     if (!conv) return () => { /* noop */ };
     conv.listeners.add(handler);
-    return () => conv.listeners.delete(handler);
+    // The conversation's CURRENT state: a reopened thread (reopenThread) carries its listeners into a new one, and
+    // an unsubscribe bound to the old state left them there for good — a long-lived watcher then ran once more
+    // after every reopen (three compaction rows for one compaction).
+    return () => {
+      conv.listeners.delete(handler);
+      this.conversations.get(conversationId)?.listeners.delete(handler);
+    };
   }
 
   // ── Private helpers ───────────────────────────────────────────────
