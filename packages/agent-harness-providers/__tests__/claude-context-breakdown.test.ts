@@ -83,6 +83,7 @@ const RESULT_MESSAGE = {
 function snapshotFor(
   usage: unknown = LIVE_USAGE,
   resultMessage: unknown = RESULT_MESSAGE,
+  observed?: [string, { contextWindow: number; maxOutputTokens?: number }],
 ): Record<string, unknown> | undefined {
   const provider = new ClaudeAgentProvider({
     cliPath: '/nonexistent/claude',
@@ -92,7 +93,9 @@ function snapshotFor(
     contextProbes: Map<string, { inFlight: boolean; latest: unknown }>;
     emitEventToHandlers: (id: string, event: AgentEvent) => void;
     emitContextUsageSnapshot: (id: string, resultMessage: unknown) => void;
+    observedModelLimits: Map<string, { contextWindow?: number; maxOutputTokens?: number }>;
   };
+  if (observed) internals.observedModelLimits.set(...observed);
 
   const emitted: AgentEvent[] = [];
   internals.emitEventToHandlers = (_id, event) => {
@@ -158,5 +161,17 @@ describe('claude-agent provider-reported context snapshot', () => {
   it('falls back to the probe total when the result carries no per-call breakdown', () => {
     const d = snapshotFor(LIVE_USAGE, { usage: { input_tokens: 1, output_tokens: 1 } })!;
     expect(d['currentTokens']).toBe(39_029);
+  });
+
+  it('keeps the model\'s window when the CLI reports the shorter auto-compaction window it was given', () => {
+    // autoCompactWindow 100K on a 200K model: the CLI answers "100k" as the window and compacts at 67K.
+    const shortened = { ...LIVE_USAGE, maxTokens: 100_000, rawMaxTokens: 100_000, autoCompactThreshold: 67_000, model: 'claude-sonnet-5-5' };
+    const d = snapshotFor(shortened, RESULT_MESSAGE, ['claude-sonnet-5-5', { contextWindow: 200_000, maxOutputTokens: 32_000 }])!;
+    expect(d['totalContextWindow']).toBe(200_000);
+    // The same budget the result-derived snapshot publishes, so the gauge does not jump between the two.
+    expect(d['promptTokenLimit']).toBe(168_000);
+    expect(d['compactionThreshold']).toBe(67_000);
+    // Without a larger window on record the CLI's figure stands.
+    expect(snapshotFor(shortened)!['promptTokenLimit']).toBe(100_000);
   });
 });

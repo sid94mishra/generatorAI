@@ -1249,6 +1249,18 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   /**
+   * The limits a `result` reported for `model`, when its window is larger than the `reported` one — the CLI's
+   * context report shrinks to the auto-compaction window it was given. Undefined when nothing larger is known.
+   */
+  private realLimitsWithin(model: string | undefined, reported: number | undefined): { contextWindow: number; maxOutputTokens?: number } | undefined {
+    if (!model || typeof reported !== 'number') return undefined;
+    const row = this.modelCache?.rows.find((r) => r.model.id === model || r.resolvedModel === model);
+    const seen = this.observedModelLimits.get(model) ?? (row ? this.observedModelLimits.get(row.model.id) ?? (row.resolvedModel ? this.observedModelLimits.get(row.resolvedModel) : undefined) : undefined);
+    if (!seen?.contextWindow || seen.contextWindow <= reported) return undefined;
+    return { contextWindow: seen.contextWindow, ...(seen.maxOutputTokens != null ? { maxOutputTokens: seen.maxOutputTokens } : {}) };
+  }
+
+  /**
    * Overlay runtime-observed limits onto an alias row.
    *
    * Matching is by model id first, then by the canonical id the alias resolves
@@ -3423,17 +3435,20 @@ export class ClaudeAgentProvider implements IAgentHarness {
           : {}),
       };
 
+      // With an auto-compaction threshold set (settings.autoCompactWindow) the CLI reports the window it was told
+      // to compact within as the context's size: "65k / 100k" for a 200K model. The model's window is what the
+      // turn's `result` reported, so the gauge keeps that and the threshold travels as `compactionThreshold`.
+      const limits = this.realLimitsWithin(usage.model, usage.rawMaxTokens);
+      const promptTokenLimit = limits ? Math.max(0, limits.contextWindow - (limits.maxOutputTokens ?? 0)) : usage.maxTokens;
+      const totalContextWindow = limits ? limits.contextWindow : usage.rawMaxTokens;
+
       await this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
         provider: 'claude-agent',
         source: 'provider',
         currentTokens,
         ...(usage.model ? { model: usage.model } : {}),
-        ...(typeof usage.maxTokens === 'number' && usage.maxTokens > 0
-          ? { promptTokenLimit: usage.maxTokens }
-          : {}),
-        ...(typeof usage.rawMaxTokens === 'number' && usage.rawMaxTokens > 0
-          ? { totalContextWindow: usage.rawMaxTokens }
-          : {}),
+        ...(typeof promptTokenLimit === 'number' && promptTokenLimit > 0 ? { promptTokenLimit } : {}),
+        ...(typeof totalContextWindow === 'number' && totalContextWindow > 0 ? { totalContextWindow } : {}),
         ...(typeof usage.autoCompactThreshold === 'number' && usage.isAutoCompactEnabled
           ? { compactionThreshold: usage.autoCompactThreshold }
           : {}),
