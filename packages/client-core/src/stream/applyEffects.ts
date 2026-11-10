@@ -90,6 +90,8 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
       return r.setUsage(streams, effect.key, effect.usage as never);
     case 'setContextUsage':
       return r.setContextUsage(streams, effect.key, effect.snapshot as never);
+    case 'markContextCompacted':
+      return r.markContextCompacted(streams, effect.key);
     case 'upsertPlan':
       return r.upsertPlan(streams, effect.key, effect.plan);
     case 'setPlanStatus':

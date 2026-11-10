@@ -54,6 +54,11 @@ export interface ContextUsageSnapshot {
   };
   /** Client clock time the snapshot was applied — drives the "as of" label. */
   at?: number;
+  /**
+   * The conversation was compacted after this snapshot and the provider has not said its new size yet (Codex
+   * reports it with the next request): the count is no longer true, the window still is.
+   */
+  compacted?: boolean;
 }
 
 /** The last turn's raw token counters (`harness.usage`). */
@@ -97,6 +102,8 @@ export interface ResolvedContextUsage {
   messagesLength?: number;
   apiUsage?: ContextUsageSnapshot['apiUsage'];
   model?: string;
+  /** Compacted since the last count: `used` is unknown until the next response. */
+  compacted?: boolean;
 }
 
 /**
@@ -170,7 +177,9 @@ export function resolveContextUsage(args: {
 
   let used: number | null = null;
   let source: ResolvedContextUsage['source'] = 'none';
-  if (snapshot && Number.isFinite(snapshot.currentTokens) && snapshot.currentTokens >= 0) {
+  if (snapshot?.compacted) {
+    // Neither the old count nor the last turn's usage describes the window any more.
+  } else if (snapshot && Number.isFinite(snapshot.currentTokens) && snapshot.currentTokens >= 0) {
     used = snapshot.currentTokens;
     source = snapshot.source;
   } else if (usage && usageMeasuresOnePrompt(usage)) {
@@ -194,7 +203,8 @@ export function resolveContextUsage(args: {
     remaining: used != null && limit != null ? Math.max(0, limit - used) : null,
     source,
   };
-  if (snapshot?.breakdown) result.breakdown = snapshot.breakdown;
+  if (snapshot?.breakdown && !snapshot.compacted) result.breakdown = snapshot.breakdown;
+  if (snapshot?.compacted) result.compacted = true;
   if (snapshot?.compactionThreshold != null) result.compactionThreshold = snapshot.compactionThreshold;
   if (snapshot?.messagesLength != null) result.messagesLength = snapshot.messagesLength;
   if (snapshot?.apiUsage) result.apiUsage = snapshot.apiUsage;

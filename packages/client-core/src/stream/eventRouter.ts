@@ -159,6 +159,7 @@ export type StreamEffect =
   | { op: 'setTyping'; key: string; typing: boolean }
   | { op: 'setUsage'; key: string; usage: Record<string, unknown> }
   | { op: 'setContextUsage'; key: string; snapshot: Record<string, unknown> }
+  | { op: 'markContextCompacted'; key: string }
   | { op: 'upsertPlan'; key: string; plan: Omit<PlanBlock, 'type' | 'blockId'> }
   | {
       op: 'setPlanStatus';
@@ -1436,6 +1437,8 @@ export class StreamEventRouter {
               category: 'compaction',
               label: 'Compacted',
             });
+            // No size after it (Codex says it with the next request): the gauge must not keep the size before.
+            if (postTokens == null) out.push({ op: 'markContextCompacted', key });
           }
           break;
         }

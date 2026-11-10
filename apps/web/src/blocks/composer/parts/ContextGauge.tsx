@@ -85,7 +85,9 @@ export function ContextGauge({ snapshot, usage, model, tier, showLabel = true, c
   const title =
     resolved.used != null && resolved.limit != null
       ? `Context: ${formatTokens(resolved.used)} / ${formatTokens(resolved.limit)} (${pctLabel}%)`
-      : 'Context usage — waiting for the first response';
+      : resolved.compacted
+        ? 'Context compacted — the new size shows after the next response'
+        : 'Context usage — waiting for the first response';
 
   return (
     <PopoverRoot>
@@ -154,7 +156,11 @@ export function ContextUsageDetails({
       </div>
 
       {used == null ? (
-        <p className="text-fg-3">Context usage appears here after the model responds.</p>
+        <p className="text-fg-3">
+          {resolved.compacted
+            ? 'The conversation was compacted. Its new size shows after the next response.'
+            : 'Context usage appears here after the model responds.'}
+        </p>
       ) : (
         <>
           <div className="flex items-baseline justify-between">

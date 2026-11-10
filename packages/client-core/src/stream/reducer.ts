@@ -935,6 +935,16 @@ export function setContextUsage(
   });
 }
 
+/**
+ * The conversation was compacted and the provider gave no size after it: the gauge keeps the window and says the
+ * count is unknown, instead of showing the size before the compaction, until the next snapshot replaces it.
+ */
+export function markContextCompacted(streams: StreamsRecord, sessionId: string, now: number = Date.now()): StreamsRecord {
+  const existing = streams[sessionId];
+  if (!existing?.contextUsage) return streams;
+  return put(streams, sessionId, { ...existing, contextUsage: { ...existing.contextUsage, compacted: true, at: now } });
+}
+
 // ── Widgets ─────────────────────────────────────────────────────
 
 export function addWidget(

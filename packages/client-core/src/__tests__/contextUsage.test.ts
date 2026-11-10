@@ -74,6 +74,15 @@ describe('resolveContextUsage', () => {
     expect(r.remaining).toBe(150_000);
   });
 
+  it('after a compaction with no size yet: the window stays, the count is unknown (not the size before, nor the last turn)', () => {
+    const r = resolveContextUsage({
+      snapshot: { source: 'provider', currentTokens: 109_000, promptTokenLimit: 258_400, compacted: true },
+      usage: { model: 'x', inputTokens: 109_000, outputTokens: 10 },
+      model,
+    });
+    expect(r).toMatchObject({ used: null, pct: null, limit: 258_400, compacted: true, source: 'none' });
+  });
+
   it("lets the provider's runtime limit override the catalog's", () => {
     // The session may have negotiated the long-context tier.
     const r = resolveContextUsage({

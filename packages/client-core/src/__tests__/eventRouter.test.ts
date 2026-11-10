@@ -383,6 +383,12 @@ describe('StreamEventRouter — session_info notices', () => {
     ]);
   });
 
+  it('marks the gauge stale after a compaction that gave no size, not after one that did', () => {
+    const ops = (effects: ReturnType<typeof run>) => effects.filter((e) => e.op === 'markContextCompacted').length;
+    expect(ops(run([info('compact_boundary', 'x', { trigger: 'manual', preTokens: 109_000 })]))).toBe(1);
+    expect(ops(run([info('compact_boundary', 'x', { trigger: 'manual', preTokens: 150_000, postTokens: 20_000 })]))).toBe(0);
+  });
+
   it('stays silent for the high-volume informational types', () => {
     // These are per-chunk or per-poll frames that no surface reads; admitting
     // them would put a transcript row on every line of command output.
