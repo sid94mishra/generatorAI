@@ -16,7 +16,7 @@ export interface OrchestratorToolSetDeps {
   parentId: string;
   owner?: string;
   /**
-   * Append `list_available_agents`. Off by default: adding a 7th tool
+   * Append `list_available_agents`. Off by default: adding a tool
    * unconditionally would change the tools prefix of EVERY existing
    * orchestrator chat and cost a one-time full prompt-cache miss on upgrade.
    */
@@ -173,6 +173,33 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     },
   };
 
+  const cancel: ToolDefinition = {
+    name: 'cancel_background_agent',
+    description:
+      'Stop one of your background workers that is still running — one spawned by mistake (wrong model, agent ' +
+      'or brief) or whose work is no longer needed. Its edits so far stay in its workspace; spawn a corrected ' +
+      'worker if the task still has to be done.',
+    parametersSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'The taskId of the worker to stop.' },
+      },
+      required: ['taskId'],
+    },
+    skipPermission: true,
+    owner: owner ?? `orchestrator:${parentId}`,
+    handler: async (args) => {
+      const a = args as { taskId?: unknown };
+      if (typeof a.taskId !== 'string') return { ok: false, error: 'taskId is required' };
+      // Only this orchestrator's own workers.
+      const task = (await orchestratorService.listBackgroundAgents(parentId)).find((t) => t.taskId === a.taskId);
+      if (!task) return { ok: false, error: `No worker ${a.taskId} among yours` };
+      if (task.status !== 'running' && task.status !== 'spawned') return { ok: false, error: `Worker ${task.taskName} is not running (${task.status})` };
+      const cancellation = await orchestratorService.cancelBackgroundAgent(a.taskId, 'orchestrator');
+      return { ok: cancellation != null, taskId: a.taskId, status: 'cancelled' };
+    },
+  };
+
   const listModels: ToolDefinition = {
     name: 'list_models',
     description:
@@ -212,8 +239,8 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     },
   };
 
-  // Deterministic order (M2). The optional 7th tool is APPENDED so the prefix
+  // Deterministic order (M2). The optional agent-discovery tool is APPENDED so the prefix
   // of the original six hashes identically for chats that do not use it.
-  const base = [listModels, spawn, checkAll, checkOne, send, list];
+  const base = [listModels, spawn, checkAll, checkOne, send, list, cancel];
   return deps.includeAgentDiscovery ? [...base, listAvailableAgents] : base;
 }

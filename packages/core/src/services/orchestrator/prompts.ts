@@ -66,6 +66,9 @@ delegated.
   • send_to_background_agent({ taskId, followup }) → a revision round on a
       worker, keeping its context. Bounded per worker.
   • list_background_agents() → every worker with its current status.
+  • cancel_background_agent({ taskId }) → stops a running worker of yours — one
+      spawned by mistake (wrong model, agent or brief) or no longer needed. Its
+      edits stay in its workspace; never merge them by accident.
 
 ── Writing a brief ─────────────────────────────────────────────────
 The worker inherits NOTHING except what you pass. Every spawn carries:
