@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, screen, userEvent, waitFor, within } from 'storybook/test';
 import { CompactionDivider } from './CompactionDivider.js';
 
 const meta = {
@@ -24,8 +24,13 @@ export const ManualWithSummary: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement);
     await expect(c.getByText('Conversation compacted · 152K → 21K tokens')).toBeVisible();
+    // The summary opens in a dialog, not in the transcript.
+    await expect(c.queryByTestId('compaction-summary')).toBeNull();
     await userEvent.click(c.getByRole('button', { name: 'Summary' }));
-    await expect(c.getByRole('button', { name: 'Hide summary' })).toHaveAttribute('aria-expanded', 'true');
+    const dialog = await screen.findByRole('dialog', { name: 'Compaction summary' });
+    await expect(within(dialog).getByText('fix the flaky checkout test.', { exact: false })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getAllByRole('button', { name: 'Close' }).at(-1)!);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   },
 };
 
