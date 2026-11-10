@@ -132,3 +132,35 @@ Settings › Context compaction, the model picker's move between providers.
 | V1 | Claude manual compaction on the fixed build | "Compacting conversation…" live with Stop; the divider without a reload; facts kept |
 
 Unit suites at the end: agent-harness-providers 864, core services 590, client-core 879 (all passing).
+
+### 7.1 Real work, end to end (2026-11-10, the Pulse test repo, worktrees on `develop`)
+
+Long coding tasks a user would run, each on its own worktree of the Pulse test repository (never this repo), driven
+through the composer, the Compact button, the model picker and Settings › Context compaction. Every result was
+checked outside the app: the branch's commits, and the repo's own api and web suites and typecheck run in the
+worktree.
+
+| Run | What | Result |
+|---|---|---|
+| E1 | Sonnet 5.5 builds monitor tags (migration, repository, routes, tests) and the web UI; Compact with focus instructions; move to Codex (tag validation); back to Claude for a review | 3 commits (2 Claude, 1 Codex), api 130/130, web 135/135, web build green. 84K → 11K; Codex and Claude both recalled the codename and reviewer after the compaction and both moves |
+| E2 | Background tasks: an Opus 5.5 orchestrator splits two endpoints over a Sonnet worker and a Codex worker, reviews, merges; Compact; move to Codex for the README | 5 commits, api 144/144, typecheck green; auto-compaction inside the orchestrator's 33-minute turn (68K → 5K) and inside both Codex workers (52K, 53K — fresh threads, no warm-up); the ticket id survived compaction and the move |
+| E3 | Codex: cursor pagination over six list routes, then sorting; auto-compaction **turned off while the chat was open**; Compact; Claude reviews | auto-compacted at 51K under 20 %; with the setting off it ran to 109K without compacting (the live thread took the change); Claude's review fixed a real web-client bug in Codex's commit; api 130/130, web 135/135 |
+
+Found and fixed on the way:
+
+| Finding | Fix |
+|---|---|
+| Claude's gauge read "65k / 100k" on a 1M model: with an auto-compaction threshold the CLI reports the shortened window as the context's size, and the result-derived snapshot reported the real one, so the limit jumped | 57d5a993 — the gauge keeps the model's window; the threshold shows as "Auto-compacts at" |
+| One Compact on a Codex chat whose thread had been reopened twice (two setting changes) wrote three compaction rows, without a size | 396eabbe — the unsubscribe follows the conversation's current state; a reopened thread keeps its last size |
+| After a Codex compaction the gauge kept the size before it (109K) | dd1c41ef — "compacted, the new size shows after the next response" until Codex reports it |
+| A Codex turn stored 1.5 MB of metadata (whole `rg` outputs, 190 KB each), read back on every history load | 8b9d022e — a turn keeps 32K characters per tool result (head and tail) |
+| An orchestrator that spawned a worker on the wrong model (a bound agent pinned another one) could not stop it | b43c574d — `cancel_background_agent` |
+
+Observed, not changed (owner decisions):
+
+- The orchestrator (Claude Code) wrote "Co-Authored-By: Claude Opus 5.5" into its workers' commit instructions —
+  Codex workers' commits carry it too. The CLI's attribution setting could turn it off for every chat.
+- A worker's permission request shows in the orchestrator's Tasks dock with only "Open task chat": approving a
+  wave means visiting each worker chat.
+- Claude's auto-compaction threshold is computed from 200K until the first turn reports the model's window, so a
+  1M model's first turn compacts earlier than the percentage says.
