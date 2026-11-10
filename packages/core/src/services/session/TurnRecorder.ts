@@ -14,6 +14,21 @@ import type { AgentEvent, AgentMode, ChatMessageMetadata } from '@generatorai/sh
 
 export type RecordedToolCall = NonNullable<ChatMessageMetadata['toolCalls']>[number];
 
+/**
+ * The most of one tool result a turn keeps. Some providers report a command's whole output (a Codex `rg -C 6`
+ * over a repo: 190 KB, 1.5 MB of metadata in one reply), and every history load reads it back. The model saw
+ * its own truncated copy, so the head and the tail are what is worth keeping.
+ */
+export const MAX_RECORDED_RESULT_CHARS = 32_000;
+
+export function boundToolResult(result: unknown): unknown {
+  if (typeof result !== 'string' || result.length <= MAX_RECORDED_RESULT_CHARS) return result;
+  const tail = Math.floor(MAX_RECORDED_RESULT_CHARS / 4);
+  const head = MAX_RECORDED_RESULT_CHARS - tail;
+  const omitted = result.length - head - tail;
+  return `${result.slice(0, head)}\n… ${omitted.toLocaleString('en-US')} characters omitted …\n${result.slice(-tail)}`;
+}
+
 /** The turn's state, as a durable journal keeps it and restores it on replay. */
 export interface TurnSnapshot {
   /** The last completed assistant message (`message_complete`). */
@@ -173,7 +188,7 @@ export class TurnRecorder {
         const matchKey = (data?.['callId'] as string) ?? (data?.['tool'] as string);
         const tc = this.calls.find((t) => t.status === 'running' && (t.id === matchKey || t.tool === matchKey));
         if (!tc) break;
-        tc.result = data?.['result'];
+        tc.result = boundToolResult(data?.['result']);
         tc.status = 'complete';
         const success = data?.['success'];
         if (typeof success === 'boolean') tc.success = success;

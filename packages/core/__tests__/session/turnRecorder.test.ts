@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@generatorai/shared';
-import { TurnRecorder } from '../../src/services/session/TurnRecorder.js';
+import { MAX_RECORDED_RESULT_CHARS, TurnRecorder } from '../../src/services/session/TurnRecorder.js';
 
 const ev = (kind: string, data: Record<string, unknown> = {}) => ({ kind, data }) as unknown as AgentEvent;
 
@@ -69,5 +69,22 @@ describe('TurnRecorder', () => {
     expect(replayed.content).toBe('ok');
     expect(replayed.persisted).toBe(true);
     expect(replayed.snapshot()).toEqual(snap);
+  });
+
+  it('keeps the head and tail of an oversized tool result, not all of it', () => {
+    const r = new TurnRecorder();
+    r.begin();
+    const huge = `HEAD${'x'.repeat(200_000)}TAIL`;
+    r.observe(ev('harness.tool_start', { callId: 'c1', tool: 'shell', args: {} }));
+    r.observe(ev('harness.tool_complete', { callId: 'c1', result: huge, success: true }));
+    r.observe(ev('harness.tool_start', { callId: 'c2', tool: 'shell', args: {} }));
+    r.observe(ev('harness.tool_complete', { callId: 'c2', result: 'small', success: true }));
+    r.observe(ev('harness.message_complete', { content: 'done' }));
+    const [big, small] = r.take()!.metadata.toolCalls! as Array<{ result: string }>;
+    expect(big.result.length).toBeLessThan(MAX_RECORDED_RESULT_CHARS + 100);
+    expect(big.result.startsWith('HEAD')).toBe(true);
+    expect(big.result.endsWith('TAIL')).toBe(true);
+    expect(big.result).toContain('characters omitted');
+    expect(small.result).toBe('small');
   });
 });
