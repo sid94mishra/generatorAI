@@ -4,7 +4,7 @@
 // returned, and a flat ready-only list.
 
 import { describe, expect, it } from 'vitest';
-import type { HarnessProviderStatus, HarnessProvidersResponse } from '@generatorai/shared';
+import type { HarnessProviderStatus, HarnessProvidersResponse, HarnessSubProviderStatus } from '@generatorai/shared';
 import {
   buildModelPickerCatalog,
   findPickerModel,
@@ -254,5 +254,82 @@ describe('helpers', () => {
       ['codex-m1', 'codex'],
       ['copilot-m1', 'copilot'],
     ]);
+  });
+});
+
+describe('buildModelPickerCatalog — sub-providers (ACP-3)', () => {
+  const mark = { viewBox: '0 0 16 16', nodes: [{ tag: 'path' as const, attrs: { d: 'M0 0h16v16H0z' } }] };
+  const sub = (id: string, patch: Partial<HarnessSubProviderStatus> = {}): HarnessSubProviderStatus => ({
+    id,
+    label: id.toUpperCase(),
+    installed: true,
+    connected: true,
+    authState: 'authenticated',
+    authenticated: true,
+    ready: true,
+    modelCount: 1,
+    ...patch,
+  });
+  const acp = (subProviders: HarnessSubProviderStatus[], models: HarnessProviderStatus['models']) =>
+    provider('acp', { label: 'ACP agents', subProviders, models, modelCount: models.length, ready: models.length > 0 });
+
+  it('draws one entry per sub-provider with its key, label, mark, readiness and only its models', () => {
+    const catalog = buildModelPickerCatalog(
+      response('claude-agent', [
+        provider('claude-agent'),
+        acp(
+          [
+            sub('gemini', { mark }),
+            sub('goose', { ready: false, authenticated: false, authState: 'unauthenticated', error: 'Sign in to Goose', modelCount: 0 }),
+            sub('kimi', { installed: false, ready: false, connected: false, modelCount: 0 }),
+          ],
+          [
+            { id: 'gemini/pro', name: 'Gemini Pro', provider: 'acp', subProvider: 'gemini' },
+            { id: 'gemini/flash', name: 'Gemini Flash', provider: 'acp', subProvider: 'gemini' },
+            // A model of a sub-provider that is not ready never shows.
+            { id: 'goose', name: 'Goose', provider: 'acp', subProvider: 'goose' },
+          ],
+        ),
+      ]),
+    );
+    expect(catalog.providers.map((p) => [p.key, p.type, p.availability])).toEqual([
+      ['claude-agent', 'claude-agent', 'ready'],
+      ['acp:gemini', 'acp', 'ready'],
+      ['acp:goose', 'acp', 'signed_out'],
+      ['acp:kimi', 'acp', 'not_installed'],
+    ]);
+    const gemini = catalog.providers[1]!;
+    expect(gemini.label).toBe('GEMINI');
+    expect(gemini.subProvider).toBe('gemini');
+    expect(gemini.mark).toEqual(mark);
+    expect(gemini.supportsLogin).toBe(false);
+    expect(gemini.models.map((m) => [m.id, m.provider, m.providerKey])).toEqual([
+      ['gemini/pro', 'acp', 'acp:gemini'],
+      ['gemini/flash', 'acp', 'acp:gemini'],
+    ]);
+    expect(catalog.providers[2]!.models).toEqual([]);
+    expect(catalog.providers[2]!.error).toBe('Sign in to Goose');
+    expect(catalog.providers[3]!.mark).toBeUndefined();
+    // Selecting still sets provider `acp`; the flat list carries the agent's models once.
+    expect(findPickerModel(catalog, 'gemini/flash', 'acp')?.providerKey).toBe('acp:gemini');
+    expect(catalog.models.map((m) => m.id)).toEqual(['claude-agent-m1', 'gemini/pro', 'gemini/flash']);
+  });
+
+  it('opens on a ready sub-provider by key when it ranks first, and shows nothing with no agent enabled', () => {
+    const only = buildModelPickerCatalog(
+      response('copilot', [signedOut('copilot'), acp([sub('gemini')], [{ id: 'gemini', name: 'Gemini', provider: 'acp', subProvider: 'gemini' }])]),
+    );
+    expect(only.defaultProvider).toBe('acp');
+    expect(only.defaultProviderKey).toBe('acp:gemini');
+
+    const none = buildModelPickerCatalog(response('claude-agent', [provider('claude-agent'), acp([], [])]));
+    expect(none.providers.map((p) => p.key)).toEqual(['claude-agent']);
+    expect(none.defaultProviderKey).toBe('claude-agent');
+  });
+
+  it('keys a plain provider by its type', () => {
+    const catalog = buildModelPickerCatalog(response('codex', [provider('codex')]));
+    expect(catalog.providers[0]!.key).toBe('codex');
+    expect(catalog.models[0]!.providerKey).toBe('codex');
   });
 });

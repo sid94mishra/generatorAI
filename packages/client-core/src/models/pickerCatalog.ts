@@ -15,10 +15,23 @@
 // chat — on every OS. `defaultProvider` is `primary` only while it is ready,
 // else the first ready provider, else null.
 //
+// Sub-providers (docs/acp ACP-3): a provider whose status carries
+// `subProviders` (`acp`, which multiplexes ACP agents) is drawn as one entry
+// per sub-provider — `key` `acp:<agentId>`, the agent's label, mark and own
+// readiness, and only its models (`subProvider`). `type` stays the provider
+// id (`acp`): that is what a selection sets. Entries are keyed by `key`.
+//
 // React-free: web wraps it in a hook, mobile and the CLI call it directly.
 // ────────────────────────────────────────────────────────────────
 
-import { REASONING_EFFORTS, type HarnessCatalogModel, type HarnessProviderStatus, type HarnessProvidersResponse } from '@generatorai/shared';
+import {
+  REASONING_EFFORTS,
+  type HarnessCatalogModel,
+  type HarnessProviderStatus,
+  type HarnessProvidersResponse,
+  type HarnessSubProviderStatus,
+  type ProviderMark,
+} from '@generatorai/shared';
 import { formatTokenLimit } from './formatTokenLimit.js';
 
 /** Why a provider can or cannot be used right now. */
@@ -29,6 +42,8 @@ export interface PickerModel {
   id: string;
   name: string;
   provider: string;
+  /** The `key` of the picker entry that lists it (`provider`, or `acp:<agentId>` for a sub-provider's model). */
+  providerKey: string;
   description: string | null;
   /** The provider flags this model as the account default (the row's "default" badge). */
   isDefault: boolean;
@@ -54,8 +69,15 @@ export interface ModelDetail {
 
 /** One entry of the provider column. */
 export interface PickerProvider {
+  /** Unique entry key: the provider id, or `<type>:<subProvider>` for a sub-provider (`acp:gemini`). */
+  key: string;
+  /** The provider id a selection sets (`acp` for every ACP agent). */
   type: string;
+  /** The sub-provider (ACP agent id) this entry stands for. */
+  subProvider?: string;
   label: string;
+  /** A server-supplied mark (an ACP agent's icon); absent = the provider's own logo. */
+  mark?: ProviderMark;
   availability: ProviderAvailability;
   /** The server's configured default provider. */
   primary: boolean;
@@ -70,6 +92,8 @@ export interface ModelPickerCatalog {
   providers: PickerProvider[];
   /** The provider to open on / auto-select: never one that is not ready; null when none is. */
   defaultProvider: string | null;
+  /** The `key` of that entry (differs from `defaultProvider` for a sub-provider). */
+  defaultProviderKey: string | null;
   /** Every model of every ready provider, in `providers` order. */
   models: PickerModel[];
   /** The server answered from its snapshot and is re-probing; poll until false. */
@@ -107,7 +131,19 @@ export function effortChoices(model: HarnessCatalogModel | undefined): string[] 
   return model ? modelReasoningEfforts(model) : [...REASONING_EFFORTS];
 }
 
-export function toPickerModel(model: HarnessCatalogModel, provider: string): PickerModel {
+export function subProviderAvailability(p: HarnessSubProviderStatus): ProviderAvailability {
+  if (p.ready) return 'ready';
+  if (!p.installed) return 'not_installed';
+  if (!p.authenticated) return 'signed_out';
+  return 'unavailable';
+}
+
+/** The picker key of a sub-provider entry (`acp:<agentId>`). */
+export function subProviderKey(type: string, subProvider: string): string {
+  return `${type}:${subProvider}`;
+}
+
+export function toPickerModel(model: HarnessCatalogModel, provider: string, providerKey?: string): PickerModel {
   const efforts = modelReasoningEfforts(model);
   const defaultEffort =
     model.defaultReasoningEffort && efforts.includes(model.defaultReasoningEffort) ? model.defaultReasoningEffort : null;
@@ -115,6 +151,7 @@ export function toPickerModel(model: HarnessCatalogModel, provider: string): Pic
     id: model.id,
     name: model.name || model.id,
     provider: model.provider ?? provider,
+    providerKey: providerKey ?? model.provider ?? provider,
     description: model.description?.trim() ? model.description.trim() : null,
     isDefault: model.isDefault === true,
     contextTokens: positive(model.promptTokenLimit ?? model.standardContextWindow ?? model.contextWindow),
@@ -167,17 +204,39 @@ export function modelDetails(model: PickerModel): ModelDetail[] {
 
 /** The picker's view of the provider catalog. */
 export function buildModelPickerCatalog(response: HarnessProvidersResponse): ModelPickerCatalog {
-  const providers: PickerProvider[] = response.providers.map((p) => {
+  const providers: PickerProvider[] = response.providers.flatMap((p): PickerProvider[] => {
+    if (p.subProviders) {
+      // One entry per sub-provider (none enabled = no entry); sign-in is per agent, in Settings.
+      return p.subProviders.map((sub) => {
+        const key = subProviderKey(p.type, sub.id);
+        const availability = subProviderAvailability(sub);
+        return {
+          key,
+          type: p.type,
+          subProvider: sub.id,
+          label: sub.label,
+          ...(sub.mark ? { mark: sub.mark } : {}),
+          availability,
+          primary: p.type === response.primary,
+          error: sub.error ?? null,
+          supportsLogin: false,
+          models: availability === 'ready' ? p.models.filter((m) => m.subProvider === sub.id).map((m) => toPickerModel(m, p.type, key)) : [],
+        };
+      });
+    }
     const availability = providerAvailability(p);
-    return {
-      type: p.type,
-      label: p.label,
-      availability,
-      primary: p.type === response.primary,
-      error: p.error ?? null,
-      supportsLogin: p.supportsLogin === true,
-      models: availability === 'ready' ? p.models.map((m) => toPickerModel(m, p.type)) : [],
-    };
+    return [
+      {
+        key: p.type,
+        type: p.type,
+        label: p.label,
+        availability,
+        primary: p.type === response.primary,
+        error: p.error ?? null,
+        supportsLogin: p.supportsLogin === true,
+        models: availability === 'ready' ? p.models.map((m) => toPickerModel(m, p.type, p.type)) : [],
+      },
+    ];
   });
   const rank = (p: PickerProvider): number => (p.availability === 'ready' ? (p.primary ? 0 : 1) : 2);
   // Array.prototype.sort is stable, so server order is kept within a rank.
@@ -186,6 +245,7 @@ export function buildModelPickerCatalog(response: HarnessProvidersResponse): Mod
   return {
     providers: ordered,
     defaultProvider: first && first.availability === 'ready' ? first.type : null,
+    defaultProviderKey: first && first.availability === 'ready' ? first.key : null,
     models: ordered.flatMap((p) => p.models),
     stale: response.stale === true,
   };
