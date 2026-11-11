@@ -680,8 +680,8 @@ importers:
   apps/server:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: 2.5.0
-        version: 2.5.0(zod@3.25.76)
+        specifier: 2.6.0
+        version: 2.6.0(zod@3.25.76)
       '@generatorai/agent-harness-providers':
         specifier: workspace:*
         version: link:../../packages/agent-harness-providers
@@ -1018,8 +1018,8 @@ importers:
   packages/agent-harness-providers:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: 2.5.0
-        version: 2.5.0(zod@3.25.76)
+        specifier: 2.6.0
+        version: 2.6.0(zod@3.25.76)
       '@generatorai/core':
         specifier: workspace:*
         version: link:../core
@@ -1465,8 +1465,8 @@ packages:
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
 
-  '@agentclientprotocol/sdk@2.5.0':
-    resolution: {integrity: sha512-MFlXeIuwN6nZSK45SAsSnVjbLgQ2r4fnthoF1lQoGJP3PdaPRpOZeCF2Dds8S4cN8yZP5QbxB1bkJccGskmcYw==}
+  '@agentclientprotocol/sdk@2.6.0':
+    resolution: {integrity: sha512-3FtL6MkAV5F9qxg0FQV8wmBszIm2xuVPoDWOILIFSDQ+Vq3Twdh7Cw6Hk2GOPUbevgrTUpUAqZXQy7Geaj79mw==}
     peerDependencies:
       '@modelcontextprotocol/server': ^2.4.0
       zod: ^3.25.76 || ^4.0.0
@@ -16003,7 +16003,7 @@ snapshots:
 
   '@adobe/css-tools@4.4.4': {}
 
-  '@agentclientprotocol/sdk@2.5.0(zod@3.25.76)':
+  '@agentclientprotocol/sdk@2.6.0(zod@3.25.76)':
     dependencies:
       zod: 3.25.76
 

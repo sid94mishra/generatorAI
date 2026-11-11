@@ -16,7 +16,7 @@
     "acp:dev": "tsx --env-file-if-exists=.env --import ./src/instrumentation.ts src/acp-entry.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "2.5.0",
+    "@agentclientprotocol/sdk": "2.6.0",
     "@generatorai/agent-harness-providers": "workspace:*",
     "@generatorai/auth": "workspace:*",
     "@generatorai/core": "workspace:*",
