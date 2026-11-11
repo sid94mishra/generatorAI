@@ -207,7 +207,8 @@ export class AcpProvider implements IAgentHarness {
       authMethods: [],
       supportsLogout: false,
     };
-    return { ...base, ...(entry.startError ? { startError: entry.startError, error: entry.startError } : {}) };
+    // A start that failed is a finished check (clients stop waiting for the first probe).
+    return { ...base, ...(entry.startError ? { startError: entry.startError, error: entry.startError, checkedAt: base.checkedAt ?? Date.now() } : {}) };
   }
 
   private notifyChange(): void {

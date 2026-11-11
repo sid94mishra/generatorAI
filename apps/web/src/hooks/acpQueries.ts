@@ -29,9 +29,13 @@ const agentPath = (id: string, tail: string) => `/api/acp/agents/${encodeURIComp
 const send = (method: string, body?: unknown): RequestInit =>
   body === undefined ? { method } : { method, body: JSON.stringify(body) };
 
-/** An install is running, or an enabled agent has not answered its first probe yet. */
+/**
+ * An install is running, an enabled agent has not answered its first probe yet (it may say "Starting…"), or the
+ * list came from the built-in copy while the server fetches the registry in the background.
+ */
 const settling = (data: AcpAgentsResponse | undefined): boolean =>
-  !!data?.agents.some((a) => a.installing || (a.enabled && a.status && !a.status.checkedAt && !a.status.error));
+  (data?.registry.source === 'snapshot' && !data.registry.error) ||
+  !!data?.agents.some((a) => a.installing || (a.enabled && a.status && !a.status.checkedAt && !a.status.connected));
 
 const readyIds = (data: AcpAgentsResponse | undefined): string =>
   (data?.agents ?? []).filter((a) => a.status?.ready).map((a) => `${a.id}:${a.status?.modelCount ?? 0}`).join(',');
