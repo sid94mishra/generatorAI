@@ -9,7 +9,7 @@ export const HARNESS_PROVIDER_LABELS: Record<HarnessProviderId, string> = {
   'claude-agent': 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',
-  acp: 'ACP Agent',
+  acp: 'ACP agents',
 };
 
 /** A provider's display name; the synthetic test provider and unknown ids fall back to readable text. */
@@ -30,7 +30,7 @@ export const HARNESS_PROVIDER_STABILITY: Record<HarnessProviderId, HarnessProvid
   codex: 'stable',
   copilot: 'stable',
   opencode: 'experimental',
-  acp: 'experimental',
+  acp: 'stable',
 };
 
 /** Union across providers; model pickers should still use the live model's supported levels. */

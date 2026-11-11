@@ -109,6 +109,8 @@ export interface HarnessModel {
   };
   /** Whether the model exposes an extended (long) context tier. */
   supportsLongContext?: boolean;
+  /** The sub-provider serving it, for a provider that multiplexes agents (ACP: the agent id; docs/acp ACP-3). */
+  subProvider?: string;
 }
 
 export interface ConversationResponse {

@@ -9,6 +9,8 @@
 // (`buildModelPickerCatalog`).
 // ────────────────────────────────────────────────────────────────
 
+import type { HarnessSubProviderStatus } from './AcpAgents.js';
+
 /**
  * One model a provider serves for the signed-in account. Every field is what the
  * provider's own listing returned (D-131); an absent field was not returned.
@@ -51,6 +53,11 @@ export interface HarnessCatalogModel {
   billingMultiplier?: number;
   pricing?: { input?: number; output?: number; cached?: number; batchSize?: number };
   supportsLongContext?: boolean;
+  /**
+   * ACP-3: the sub-provider (an ACP agent id) serving this model, for a provider that multiplexes agents
+   * (`acp`). The picker groups by it (`acp:<subProvider>`); selecting the model still sets the provider.
+   */
+  subProvider?: string;
 }
 
 /** Live readiness and catalog of one agent provider. */
@@ -73,6 +80,11 @@ export interface HarnessProviderStatus {
   installable?: boolean;
   /** That download is running. */
   installing?: { receivedBytes: number; totalBytes?: number };
+  /**
+   * ACP-3: the agents a multiplexing provider (`acp`) drives, one per enabled agent, in display order.
+   * The picker draws each as its own provider entry (key `acp:<id>`, the agent's label and mark).
+   */
+  subProviders?: HarnessSubProviderStatus[];
 }
 
 /** `GET /api/harness/providers[?refresh=1]`. */

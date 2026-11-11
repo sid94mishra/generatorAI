@@ -578,6 +578,32 @@ export type {
   HarnessVisibilityUpdate,
 } from './HarnessCatalog.js';
 
+// ── ACP agents (docs/acp) ──
+export type {
+  ProviderMark,
+  ProviderMarkNode,
+  ProviderMarkTag,
+  AcpAuthState,
+  HarnessSubProviderStatus,
+  AcpDistributionKind,
+  AcpNativeProvider,
+  AcpAuthMethodInfo,
+  AcpAgentDistribution,
+  AcpInstalledAgent,
+  AcpInstallProgress,
+  AcpAgentRuntimeStatus,
+  AcpAgentEnvVar,
+  AcpAgentInfo,
+  AcpRegistryInfo,
+  AcpAgentsResponse,
+  AcpSetEnabledRequest,
+  AcpSetEnvRequest,
+  AcpAuthMethodRequest,
+  AcpTerminalAuthSpec,
+  AcpTestResult,
+  AcpCustomAgentRequest,
+} from './AcpAgents.js';
+
 // ── System info (G-12) ──
 export type { SystemInfo } from './SystemInfo.js';
 
