@@ -105,9 +105,16 @@ export type {
   CodexApprovalDecision,
 } from './types.js';
 
-// W38 — OpenCode provider (HTTP+SSE to `opencode serve`)
+// W38 — OpenCode 2 provider (HTTP API of `opencode serve`, docs/agent-platform/opencode.md)
 export type { OpenCodeProvider } from './providers/opencode/OpenCodeProvider.js';
 export type { OpenCodeProviderOptions } from './types.js';
+export {
+  resolveOpenCodeCommand,
+  OPENCODE_INSTALL_HINT,
+  type ResolvedOpenCodeCommand,
+  type ResolveOpenCodeCommandOptions,
+  type OpenCodeCommandSource,
+} from './providers/opencode/resolveOpenCodeBinary.js';
 
 // W39 — ACP agents (docs/acp): the `acp` provider multiplexes every enabled agent.
 // Type-only for the provider classes (W41: the barrel never loads them or the SDK); the registry,
@@ -174,9 +181,9 @@ export {
 //              by `codex app-server generate-json-schema` from
 //              `@openai/codex@0.167.0`. 750 definitions, including the whole
 //              `thread/*` + `turn/*` v2 surface.
-//   OpenCode → `schemas/opencode/openapi.json`, the OpenAPI 3.1 document
-//              `opencode serve` publishes at `GET /doc` on `opencode-ai@1.19.5`.
-//              472 schemas plus a derived operations table.
+//   OpenCode → `schemas/opencode/openapi.json`, OpenCode 2.2.7's
+//              `packages/protocol/openapi.json` (served at `GET /openapi.json`).
+//              497 schemas plus a derived operations table.
 //
 // The two committed artifacts replace hand-invented stand-ins that described
 // vocabularies neither binary has ever spoken. See schemas/versions.json for

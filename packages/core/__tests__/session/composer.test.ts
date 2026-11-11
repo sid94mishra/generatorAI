@@ -91,22 +91,10 @@ describe('W-19 — the run permission mode reaches Claude and Codex stages (P02-
     expect(parked).toEqual([{ stageRunId: 'sr-1', kind: 'tool_permission' }]);
   });
 
-  it("opencode on 'default' is refused at compose (PD-17)", async () => {
-    await expect(composer().compose(stageInput({ spec: { harnessType: 'opencode' }, mode: 'default' }))).rejects.toMatchObject({
-      code: 'PERMISSION_GATING_UNSUPPORTED',
-    });
-    await expect(composer().compose(stageInput({ spec: { harnessType: 'opencode' }, mode: 'acceptEdits' }))).resolves.toBeDefined();
-  });
-
-  it('opencode is refused on the mode its turns run under, not only the stored one (PD-17, review R6)', async () => {
-    // A `plan` default agent mode runs `plan` turns on an `acceptEdits` run.
-    await expect(
-      composer().compose(stageInput({ spec: { harnessType: 'opencode', defaultAgentMode: 'plan' }, mode: 'acceptEdits' })),
-    ).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
-    // An operator's `plan` turn on an `auto` stage is refused per turn.
-    const r = await composer().compose(stageInput({ spec: { harnessType: 'opencode' }, mode: 'acceptEdits' }));
-    await expect(r.turnOptions('auto')).resolves.toEqual({ agentMode: 'auto', permissionMode: 'acceptEdits' });
-    await expect(r.turnOptions('plan')).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
+  it("opencode (per call) composes on 'default' and on plan turns (PD-17)", async () => {
+    const r = await composer().compose(stageInput({ spec: { harnessType: 'opencode' }, mode: 'default' }));
+    expect(r.warnings.map((w) => w.code)).not.toContain('permission_gating_exec_and_patch');
+    await expect(r.turnOptions('plan')).resolves.toEqual({ agentMode: 'plan', permissionMode: 'plan' });
   });
 
   it("'acceptEdits' lets edits through and parks the rest; the mode is re-read every turn", async () => {

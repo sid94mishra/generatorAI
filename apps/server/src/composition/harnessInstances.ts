@@ -27,6 +27,7 @@ import { makeProviderInstanceId, type ProviderWireProtocol } from '@generatorai/
 import {
   ProviderInstanceRegistry,
   resolveCodexCommand,
+  resolveOpenCodeCommand,
   type HarnessRegistry,
   type HarnessType,
   type HarnessProviderConfig,
@@ -163,21 +164,26 @@ export async function buildInstanceProviderConfig(
       };
     }
     case 'opencode': {
-      const authToken = await resolveCredential(record, 'authToken', secretStore);
+      // Either a running OpenCode 2 server (`baseUrl` + its password) or a private one this instance starts with
+      // the same discovery as the default provider. Without either there is nothing to run.
+      const password = await resolveCredential(record, 'password', secretStore);
       const baseUrl = readString('baseUrl');
+      if (baseUrl) {
+        return {
+          type,
+          opencode: { baseUrl, password, defaultModel: record.defaultModel ?? undefined, defaultCwd: opts.artifactsDir },
+        };
+      }
+      const command = await resolveOpenCodeCommand({ configuredPath: readString('binaryPath') });
+      if (!command) return null;
       return {
         type,
         opencode: {
-          // No invented default: `opencode serve` binds an ephemeral port, so
-          // an instance row with no baseUrl means "start one and read the
-          // address back", not "try 4096 and report it unreachable".
-          baseUrl,
-          autoStart: baseUrl ? false : true,
-          binaryPath: readString('binaryPath'),
+          autoStart: true,
+          binaryPath: command.command,
+          binaryArgs: command.argsPrefix,
           defaultModel: record.defaultModel ?? undefined,
-          // Model ids are `providerID/modelID`; this qualifies a bare one.
-          defaultProviderId: readString('defaultProviderId'),
-          authToken,
+          defaultCwd: opts.artifactsDir,
         },
       };
     }

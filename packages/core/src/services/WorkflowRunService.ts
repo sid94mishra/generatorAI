@@ -557,7 +557,7 @@ export class WorkflowRunService {
 
   /**
    * PD-17 — refuse a run whose permission mode a stage's provider cannot
-   * hold (opencode never asks, so `default`/`plan` would silently run
+   * hold (a provider that never asks would run `default`/`plan` silently
    * unattended). Checked per stage with the stage's own session layered over
    * the workflow's. The engine's `prepare` runs it too, for every entry point.
    */

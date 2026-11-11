@@ -1,833 +1,540 @@
 // ────────────────────────────────────────────────────────────────
-// OpenCodeProvider — regression tests
+// OpenCodeProvider (OpenCode 2) — against a real server process.
+//
+// Every test runs the provider against `fixtures/fakeOpenCodeServe.mjs`, a
+// stand-in for `opencode serve --stdio --port 0` that follows the 2.2.7
+// contract (schemas/opencode/openapi.json): the `{"url"}` handshake and stdin
+// lease, Basic auth, `/api/*` routes, admission-then-execution prompts, the
+// V2 event envelope, permission asks, question forms, compaction, fork,
+// revert and a client-hosted MCP WebSocket. The provider spawns it exactly as
+// it would spawn OpenCode.
 // ────────────────────────────────────────────────────────────────
-//
-// W38 — every test runs against a REAL server on a real loopback port, so
-// socket lifetime, SSE framing, headers and timeouts are exercised over a real
-// connection rather than against a stubbed `fetch`.
-//
-// Two harnesses are used:
-//   • `fixtures/fakeOpenCodeServe.mjs`, a stand-in implementing the real route
-//     set and the real event ordering, spawned as a child process. Used for
-//     end-to-end behaviour.
-//   • A bespoke `node:http` server, for cases that need to observe exactly what
-//     went on the wire or to misbehave deliberately.
-//
-// This suite was rewritten alongside the provider. The previous version
-// asserted a contract `opencode serve` does not offer — that
-// `POST /session/{id}/message` answers with an SSE stream, and that
-// `POST /session` accepts `model` and `systemPrompt` — so it passed while the
-// integration could not have worked against a real server. See
-// `OPENCODE_OPERATIONS` in the generated protocol for which routes stream.
-//
-// Each `describe` below names the defect it pins.
 
-import { describe, expect, it, afterEach } from 'vitest';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { AddressInfo } from 'node:net';
-import { OpenCodeProvider, externalDirectoryRules } from '../OpenCodeProvider.js';
-import {
-  runCapabilityDeclarationConformance,
-  runConversationLifecycleConformance,
-  runFullConformance,
-} from '../../../conformance/index.js';
-import { OPENCODE_OPERATIONS } from '../../../protocol/opencode.generated.js';
+import { fileURLToPath } from 'node:url';
+import { OpenCodeProvider, OWNER_METADATA_KEY, INSTRUCTION_KEY } from '../OpenCodeProvider.js';
+import { runCapabilityDeclarationConformance, runFullConformance } from '../../../conformance/index.js';
 import type { AgentEvent } from '@generatorai/shared';
-import type { CreateConversationParams } from '@generatorai/core';
+import type { CreateConversationParams, ToolDefinition } from '@generatorai/core';
 import type { OpenCodeProviderOptions } from '../../../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SERVE_FIXTURE = join(__dirname, 'fixtures', 'fakeOpenCodeServe.mjs');
+const FIXTURE = join(__dirname, 'fixtures', 'fakeOpenCodeServe.mjs');
 
-/** One recorded request: what the provider actually put on the wire. */
-interface Recorded {
-  method: string;
-  url: string;
-  headers: IncomingMessage['headers'];
-  body: unknown;
-}
-
-interface Harness {
-  baseUrl: string;
-  requests: Recorded[];
-  /** Responses still open server-side. Drains as the client releases them. */
-  openResponses: Set<ServerResponse>;
-  close(): Promise<void>;
-}
-
-type Handler = (req: IncomingMessage, res: ServerResponse, body: unknown, h: Harness) => void;
-
-let servers: Server[] = [];
 const live: OpenCodeProvider[] = [];
+const procs: ChildProcess[] = [];
 
-async function startHarness(handler: Handler): Promise<Harness> {
-  const requests: Recorded[] = [];
-  const openResponses = new Set<ServerResponse>();
-  const harness = { requests, openResponses } as Harness;
+afterEach(async () => {
+  await Promise.all(live.splice(0).map((p) => p.shutdown().catch(() => undefined)));
+  for (const p of procs.splice(0)) { p.stdin?.end(); p.kill(); }
+});
 
-  const server = createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8');
-      let body: unknown;
-      try { body = raw ? JSON.parse(raw) : undefined; } catch { body = raw; }
-      requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body });
-      openResponses.add(res);
-      res.on('close', () => openResponses.delete(res));
-      handler(req, res, body, harness);
-    });
+function make(overrides: Partial<OpenCodeProviderOptions> = {}): OpenCodeProvider {
+  const p = new OpenCodeProvider({
+    autoStart: true,
+    binaryPath: process.execPath,
+    binaryArgs: [FIXTURE],
+    configFile: join(mkdtempSync(join(tmpdir(), 'oc-test-')), 'generatorai.json'),
+    ...overrides,
   });
-  servers.push(server);
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  harness.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  harness.close = () => new Promise<void>((r) => server.close(() => r()));
-  return harness;
-}
-
-/** Open an SSE response and return a pusher for it. */
-function sse(res: ServerResponse): { send: (o: unknown) => void; end: () => void } {
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-  // Flush the headers NOW. Node buffers them until the first body write, so a
-  // `writeHead`-only helper leaves the client's `fetch` unresolved — which is
-  // not how any real SSE server behaves, and made these tests hang rather than
-  // exercise what they meant to.
-  res.write(': open\n\n');
-  return {
-    send: (o: unknown) => res.write(`data: ${JSON.stringify(o)}\n\n`),
-    end: () => res.end(),
-  };
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
-}
-
-function makeProvider(opts: OpenCodeProviderOptions): OpenCodeProvider {
-  const p = new OpenCodeProvider(opts);
   live.push(p);
   return p;
 }
 
-/** A provider wired to the real fixture server, started by the provider itself. */
-async function startedAgainstFixture(
-  overrides: Partial<OpenCodeProviderOptions> = {},
-): Promise<OpenCodeProvider> {
-  const p = makeProvider({
-    autoStart: true,
-    binaryPath: process.execPath,
-    serveArgs: [SERVE_FIXTURE, 'serve', '--port', '0'],
-    defaultProviderId: 'opencode',
-    ...overrides,
-  });
+async function started(overrides: Partial<OpenCodeProviderOptions> = {}): Promise<OpenCodeProvider> {
+  const p = make(overrides);
   await p.initialize();
   return p;
 }
 
-function collect(provider: OpenCodeProvider, conversationId: string): { events: AgentEvent[]; stop: () => void } {
-  const events: AgentEvent[] = [];
-  const stop = provider.onConversationEvent(conversationId, (e) => events.push(e));
-  return { events, stop };
+/** The fixture's address, as the provider learned it. */
+const urlOf = (p: OpenCodeProvider): string => (p as unknown as { baseUrl: string }).baseUrl;
+
+async function testHook<T>(url: string, hook: string, body?: unknown): Promise<T> {
+  const r = await fetch(`${url}/__test/${hook}`, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
+  return (r.status === 204 ? undefined : await r.json()) as T;
 }
 
-const CONV = (id: string): CreateConversationParams => ({ conversationId: id }) as CreateConversationParams;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- recorded wire bodies are read field by field
+interface Recorded { method: string; path: string; query: string; body: any }
+const recorded = (p: OpenCodeProvider): Promise<Recorded[]> => testHook<Recorded[]>(urlOf(p), 'requests');
 
-afterEach(async () => {
-  await Promise.all(live.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
-  await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
-});
+function collect(p: OpenCodeProvider, id: string): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  p.onConversationEvent(id, (e) => events.push(e));
+  return events;
+}
 
-// ── The generated table is the contract this provider is built on ──
+const CONV = (id: string, extra: Partial<CreateConversationParams> = {}): CreateConversationParams => ({ conversationId: id, ...extra });
 
-describe('OpenCodeProvider — the routes it uses are the ones upstream declares', () => {
-  it('the prompt route is NOT a stream, and /event is', () => {
-    // The whole previous implementation rested on the opposite belief: it read
-    // the prompt response body as SSE. That parser matched no frames in a JSON
-    // object, so every turn returned empty content having emitted no tokens.
-    expect(OPENCODE_OPERATIONS['session.prompt'].sse).toBe(false);
-    expect(OPENCODE_OPERATIONS['session.prompt'].method).toBe('POST');
-    expect(OPENCODE_OPERATIONS['event.subscribe'].sse).toBe(true);
-    expect(OPENCODE_OPERATIONS['event.subscribe'].path).toBe('/event');
+const kinds = (events: AgentEvent[]) => events.map((e) => e.kind);
+const infos = (events: AgentEvent[]) =>
+  events.filter((e) => e.kind === 'harness.session_info').map((e) => (e.data as { infoType: string }).infoType);
+
+/** Spawn the fixture ourselves (an "external" server) and read its URL. */
+async function externalServer(): Promise<{ url: string; password: string; auth: string }> {
+  const password = 'external-secret';
+  const proc = spawn(process.execPath, [FIXTURE, 'serve', '--stdio', '--port', '0'], { env: { ...process.env, OPENCODE_PASSWORD: password }, stdio: ['pipe', 'pipe', 'pipe'] });
+  procs.push(proc);
+  const url = await new Promise<string>((resolve) => {
+    proc.stdout!.setEncoding('utf8');
+    proc.stdout!.on('data', (c: string) => { const m = /\{"url":"([^"]+)"\}/.exec(c); if (m) resolve(m[1]!); });
   });
+  return { url, password, auth: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}` };
+}
 
-  it('abort is a POST to /abort, not a DELETE of the message', () => {
-    expect(OPENCODE_OPERATIONS['session.abort']).toEqual({
-      method: 'POST', path: '/session/{sessionID}/abort', sse: false,
-    });
-  });
-
-  it('models come from the providers route — there is no GET /model', () => {
-    expect(OPENCODE_OPERATIONS['config.providers'].path).toBe('/config/providers');
-    // Widened deliberately: the generated `path` is a literal union, so
-    // comparing it to '/model' is a compile error precisely BECAUSE no such
-    // route exists. Keeping the runtime check makes the guarantee survive an
-    // upstream document that later adds one.
-    const paths: string[] = Object.values(OPENCODE_OPERATIONS).map((o) => o.path);
-    expect(paths).not.toContain('/model');
-  });
-});
-
-// ── Lifecycle ──
-
-describe('OpenCodeProvider — lifecycle against a real server', () => {
-  it('initialize() succeeds, ping() confirms it, and the conformance suite passes', async () => {
-    const p = await startedAgainstFixture();
+describe('start-up: spawn, auth and the version gate', () => {
+  it('starts `serve --stdio`, authenticates, and passes every W44 conformance suite', async () => {
+    const p = await started();
     expect(p.getClientState()).toBe('running');
-    await expect(p.ping()).resolves.toBe(true);
-    await expect(runConversationLifecycleConformance(p)).resolves.toBeUndefined();
-  }, 30_000);
-
-  it('initialize() fails with a helpful error when nothing is listening', async () => {
-    const p = makeProvider({ baseUrl: 'http://127.0.0.1:1' });
-    await expect(p.initialize()).rejects.toThrow(/cannot reach opencode serve/i);
-    expect(p.getClientState()).toBe('error');
-  }, 15_000);
-
-  it('refuses to guess an address when given neither baseUrl nor autoStart', async () => {
-    // `opencode serve` binds an ephemeral port by default, so the old
-    // `http://localhost:4096` default pointed at nothing on a stock install and
-    // reported it as "server unreachable".
-    const p = makeProvider({});
-    await expect(p.initialize()).rejects.toThrow(/no `baseUrl` given/i);
-  }, 15_000);
-
-  it('declares computerUse, so the L9 capability suite passes', () => {
-    const p = makeProvider({ baseUrl: 'http://127.0.0.1:1' });
-    expect(p.capabilities().computerUse).toBe(false);
-    expect(() => runCapabilityDeclarationConformance(p)).not.toThrow();
-  });
-
-  it('passes ALL FIVE W44 conformance suites', async () => {
-    const p = await startedAgainstFixture();
+    expect(await p.ping()).toBe(true);
     await expect(runFullConformance(p, {
       toolCall: { prompt: 'TOOL_OK please', expectedToolResult: 'file body' },
-      // In band: the server ends the turn itself with no local abort.
       cancellationInBand: { prompt: 'SERVER_CANCEL now' },
-      cancellationCallerAbort: {
-        prompt: 'HANG forever',
-        duringTurn: (h, id) => (h as OpenCodeProvider).abortConversation(id),
-      },
+      cancellationCallerAbort: { prompt: 'HANG forever', duringTurn: (h, id) => (h as OpenCodeProvider).abortConversation(id) },
       truncation: { prompt: 'TOOL_TRUNCATE now' },
     })).resolves.toBeUndefined();
   }, 60_000);
-});
 
-// ── Defect: the turn produced no tokens at all ──
-
-describe('OpenCodeProvider — a turn streams tokens and returns its text', () => {
-  it('emits harness.token and resolves with the assistant text', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-turn'));
-    const { events, stop } = collect(p, 'c-turn');
-    const res = await p.sendPromptAndWait('c-turn', 'say hello');
-    stop();
-
-    expect(res.content).toBe('hello ');
-    const kinds = events.map((e) => e.kind);
-    expect(kinds).toContain('harness.token');
-    expect(kinds[kinds.length - 1]).toBe('harness.idle');
-  }, 30_000);
-
-  it('derives DELTAS from cumulative part text instead of replaying the whole message', async () => {
-    // `part.text` grows: the fixture sends "hel" then "hello ". Emitting the
-    // field verbatim would show the user "hel" followed by "hello " — the
-    // prefix twice — instead of "hel" then "lo ".
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-delta'));
-    const { events, stop } = collect(p, 'c-delta');
-    await p.sendPromptAndWait('c-delta', 'say hello');
-    stop();
-
-    const tokens = events
-      .filter((e): e is Extract<AgentEvent, { kind: 'harness.token' }> => e.kind === 'harness.token')
-      .map((e) => e.data.text);
-    expect(tokens).toEqual(['hel', 'lo ']);
-    expect(tokens.join('')).toBe('hello ');
-  }, 30_000);
-
-  it('does not stream the echoed user message back as model output', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-echo'));
-    const { events, stop } = collect(p, 'c-echo');
-    await p.sendPromptAndWait('c-echo', 'UNIQUE_USER_PROMPT');
-    stop();
-    const streamed = events
-      .filter((e): e is Extract<AgentEvent, { kind: 'harness.token' }> => e.kind === 'harness.token')
-      .map((e) => e.data.text)
-      .join('');
-    expect(streamed).not.toContain('UNIQUE_USER_PROMPT');
-  }, 30_000);
-});
-
-// ── Defect: model / system prompt were sent where they are ignored ──
-
-describe('OpenCodeProvider — the requested model actually reaches the server', () => {
-  it('sends the model on the PROMPT as {providerID, modelID}, not on session creation', async () => {
-    const h = await startHarness((req, res, _body) => {
-      const url = req.url ?? '';
-      if (url.startsWith('/event')) { sse(res); return; }
-      if (url === '/session' && req.method === 'POST') { json(res, 200, { id: 'ses_1' }); return; }
-      if (url === '/session') { json(res, 200, []); return; }
-      if (url === '/session/ses_1/message' && req.method === 'POST') {
-        json(res, 200, { info: { finish: 'stop' }, parts: [{ type: 'text', text: 'ok' }] });
-        return;
-      }
-      json(res, 200, {});
+  it('declares what it implements (L9)', () => {
+    const p = make();
+    expect(() => runCapabilityDeclarationConformance(p)).not.toThrow();
+    expect(p.capabilities()).toMatchObject({
+      approvalGating: 'per_call', hostTools: 'full', structuredOutput: 'tool', skills: 'directories',
+      conversationFork: true, conversationRewind: true, conversationCompact: true, compactInstructions: false,
+      planMode: false, mcpServers: true, sessionPersistence: true,
     });
+  });
 
-    const p = makeProvider({ baseUrl: h.baseUrl });
-    await p.initialize();
-    await p.createConversation({ conversationId: 'c1', model: 'opencode/big' } as CreateConversationParams);
-    await p.sendPromptAndWait('c1', 'hi');
+  it('refuses an OpenCode older than 2.0.0 with an update message', async () => {
+    const p = make({ env: { FAKE_OC_VERSION: '1.19.5' } });
+    await expect(p.initialize()).rejects.toThrow(/OpenCode 1\.19\.5.*2\.0\.0 or later.*Update OpenCode/s);
+    expect(p.getClientState()).toBe('error');
+  });
 
-    const create = h.requests.find((r) => r.method === 'POST' && r.url === '/session');
-    // `POST /session` takes only { parentID?, title? }. Sending `model` there
-    // is silently ignored, which is how the user's choice used to vanish.
-    expect(create?.body).not.toHaveProperty('model');
-    expect(create?.body).not.toHaveProperty('systemPrompt');
+  it('recognises an OpenCode 1 binary (no `serve --stdio`) and says to update', async () => {
+    const p = make({ env: { FAKE_OC_V1: '1' } });
+    await expect(p.initialize()).rejects.toThrow(/OpenCode 1.*Update OpenCode/s);
+  });
 
-    const prompt = h.requests.find((r) => r.method === 'POST' && r.url.endsWith('/message'));
-    expect((prompt?.body as { model?: unknown }).model).toEqual({ providerID: 'opencode', modelID: 'big' });
-  }, 20_000);
+  it("reports the server's own failure when it exits before it is ready", async () => {
+    const p = make({ env: { FAKE_OC_EXIT_EARLY: '1' } });
+    await expect(p.initialize()).rejects.toThrow(/exited with code 3[\s\S]*fatal: boom/);
+  });
 
-  it('sends the system prompt on the prompt, as `system`', async () => {
-    const h = await startHarness((req, res) => {
-      const url = req.url ?? '';
-      if (url.startsWith('/event')) { sse(res); return; }
-      if (url === '/session' && req.method === 'POST') { json(res, 200, { id: 'ses_1' }); return; }
-      if (url === '/session') { json(res, 200, []); return; }
-      json(res, 200, { info: { finish: 'stop' }, parts: [] });
-    });
-    const p = makeProvider({ baseUrl: h.baseUrl });
-    await p.initialize();
-    await p.createConversation({
-      conversationId: 'c1',
-      systemMessage: { mode: 'append', content: 'BE TERSE' },
-    } as CreateConversationParams);
-    await p.sendPromptAndWait('c1', 'hi');
+  it('says OpenCode is not installed when there is no binary', async () => {
+    const p = make({ binaryPath: undefined });
+    await expect(p.initialize()).rejects.toThrow(/not installed/);
+  });
 
-    const prompt = h.requests.find((r) => r.method === 'POST' && r.url.endsWith('/message'));
-    expect((prompt?.body as { system?: string }).system).toBe('BE TERSE');
-  }, 20_000);
-
-  it('warns rather than silently dropping an unqualified model id', async () => {
-    const p = await startedAgainstFixture({ defaultProviderId: undefined });
-    await p.createConversation({ conversationId: 'c-warn', model: 'bare-model' } as CreateConversationParams);
-    const warnings = p.getConversationWarnings('c-warn');
-    expect(warnings.map((w) => w.code)).toContain('FIELD_COERCED');
-  }, 30_000);
+  it('an external server needs its password', async () => {
+    const ext = await externalServer();
+    const p = make({ autoStart: false, baseUrl: ext.url });
+    await expect(p.initialize()).rejects.toThrow(/password/);
+    const ok = make({ autoStart: false, baseUrl: ext.url, password: ext.password });
+    await expect(ok.initialize()).resolves.toBeUndefined();
+  });
 });
 
-// ── Defect: getModels() / listAgents() called routes that do not exist ──
-
-describe('OpenCodeProvider — discovery uses the real routes', () => {
-  it('lists models from /config/providers, qualified, with the fields OpenCode returned', async () => {
-    const p = await startedAgainstFixture();
-    await expect(p.getModels()).resolves.toEqual([
-      {
-        id: 'opencode/big',
-        name: 'Big Model',
-        provider: 'opencode',
-        isDefault: true,
-        supportsReasoning: true,
-        supportsVision: true,
-        promptTokenLimit: 200000,
-        totalContextWindow: 208192,
-        maxOutputTokens: 8192,
-      },
-    ]);
-  }, 30_000);
-
-  it('lists agents from /agent instead of returning nothing', async () => {
-    const p = await startedAgainstFixture();
-    const agents = await p.listAgents('anything');
-    expect(agents.map((a) => a.name)).toEqual(['build', 'plan']);
-    expect(agents[0]?.model).toBe('opencode/big');
-  }, 30_000);
-
-  it('reads message history instead of returning an empty array', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-hist'));
-    await expect(p.getMessages('c-hist')).resolves.toEqual([
-      { role: 'user', content: 'hi' },
-      { role: 'assistant', content: 'hello ' },
-    ]);
-  }, 30_000);
-});
-
-// ── Cancellation ──
-
-describe('OpenCodeProvider — abort settles the turn and frees the conversation', () => {
-  it('abortConversation() resolves the in-flight turn and the conversation stays usable', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-abort'));
-    const { events, stop } = collect(p, 'c-abort');
-
-    const turn = p.sendPromptAndWait('c-abort', 'HANG forever');
-    await new Promise((r) => setTimeout(r, 200));
-    await p.abortConversation('c-abort');
-
-    await expect(turn).resolves.toBeDefined();
-    stop();
-    expect(events.map((e) => e.kind)).toContain('harness.cancelled');
-
-    // The wedge: a conversation left `inFlight` rejects every later send.
-    await expect(p.sendPromptAndWait('c-abort', 'still working?')).resolves.toMatchObject({ content: 'hello ' });
-  }, 30_000);
-
-  it('an externally-signalled abort settles the turn and emits harness.cancelled', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-signal'));
-    const { events, stop } = collect(p, 'c-signal');
-    const ac = new AbortController();
-    const turn = p.sendPromptAndWait('c-signal', 'HANG forever', undefined, ac.signal);
-    await new Promise((r) => setTimeout(r, 200));
-    ac.abort();
-    await expect(turn).resolves.toBeDefined();
-    stop();
-    expect(events.map((e) => e.kind)).toContain('harness.cancelled');
-  }, 30_000);
-
-  it('a pre-aborted signal cancels without starting a turn', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-pre'));
-    const { events, stop } = collect(p, 'c-pre');
-    await expect(
-      p.sendPromptAndWait('c-pre', 'hi', undefined, AbortSignal.abort()),
-    ).resolves.toEqual({ content: '' });
-    stop();
-    expect(events.map((e) => e.kind)).toEqual(['harness.cancelled']);
-  }, 30_000);
-});
-
-// ── Defect: one abort listener leaked per turn on a reused signal ──
-
-describe('OpenCodeProvider — abort listeners do not accumulate on a reused signal', () => {
-  it('removes exactly as many listeners as it adds', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-leak'));
-
-    const ac = new AbortController();
-    let added = 0;
-    let removed = 0;
-    const realAdd = ac.signal.addEventListener.bind(ac.signal);
-    const realRemove = ac.signal.removeEventListener.bind(ac.signal);
-    ac.signal.addEventListener = ((...args: Parameters<typeof realAdd>) => {
-      if (args[0] === 'abort') added++;
-      return realAdd(...args);
-    }) as typeof realAdd;
-    ac.signal.removeEventListener = ((...args: Parameters<typeof realRemove>) => {
-      if (args[0] === 'abort') removed++;
-      return realRemove(...args);
-    }) as typeof realRemove;
-
-    for (let i = 0; i < 5; i++) {
-      await p.sendPromptAndWait('c-leak', 'hello', undefined, ac.signal);
-    }
-    expect(added).toBe(5);
-    expect(removed).toBe(5);
-  }, 40_000);
-});
-
-// ── Bounded calls ──
-
-describe('OpenCodeProvider — every HTTP call is bounded', () => {
-  it('initialize() gives up on a server that accepts and never answers', async () => {
-    const h = await startHarness(() => { /* accept, never respond */ });
-    const p = makeProvider({ baseUrl: h.baseUrl, requestTimeoutMs: 250 });
-    await expect(p.initialize()).rejects.toThrow(/cannot reach/i);
-  }, 20_000);
-
-  it('abandons a stream that goes quiet, rather than waiting forever', async () => {
-    const h = await startHarness((req, res) => {
-      const url = req.url ?? '';
-      if (url.startsWith('/event')) { sse(res); return; } // opens, then silence
-      if (url === '/session') { json(res, 200, []); return; }
-      json(res, 200, {});
-    });
-    const p = makeProvider({ baseUrl: h.baseUrl, sseTimeoutMs: 200 });
-    await p.initialize();
-
-    const errors: string[] = [];
-    p.onClientEvent((e) => { if (e.type === 'client.error') errors.push(String(e.data?.message ?? '')); });
-    await new Promise((r) => setTimeout(r, 600));
-    expect(errors.join(' ')).toMatch(/no SSE frame|stream lost/i);
-  }, 20_000);
-});
-
-// ── Authorization ──
-
-describe('OpenCodeProvider — Authorization carries a scheme', () => {
-  async function captureAuth(authToken: string): Promise<string | undefined> {
-    const h = await startHarness((req, res) => {
-      const url = req.url ?? '';
-      if (url.startsWith('/event')) { sse(res); return; }
-      json(res, 200, []);
-    });
-    const p = makeProvider({ baseUrl: h.baseUrl, authToken });
-    await p.initialize();
-    return h.requests[0]?.headers.authorization;
-  }
-
-  it('prefixes a bare token with Bearer', async () => {
-    await expect(captureAuth('secret-token')).resolves.toBe('Bearer secret-token');
-  }, 20_000);
-
-  it('leaves a token that already names its scheme untouched', async () => {
-    await expect(captureAuth('Basic abc123')).resolves.toBe('Basic abc123');
-  }, 20_000);
-});
-
-// ── W13-B1 truncation guard ──
-
-describe('OpenCodeProvider — W13-B1 truncation guard fails only OPEN tool calls', () => {
-  it('does not re-report an already-completed tool call as failed', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-trunc'));
-    const { events, stop } = collect(p, 'c-trunc');
-    await p.sendPromptAndWait('c-trunc', 'TOOL_TRUNCATE now');
-    stop();
-
-    const completions = events.filter(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    const byCall = new Map(completions.map((e) => [e.data.callId, e]));
-    // `call_done` genuinely succeeded before the truncation.
-    expect(byCall.get('call_done')?.data.success).toBe(true);
-    expect(completions.filter((e) => e.data.callId === 'call_done')).toHaveLength(1);
-    // `call_open` never got a result — it is the one the guard must fail.
-    expect(byCall.get('call_open')?.data.success).toBe(false);
-    expect(String(byCall.get('call_open')?.data.result)).toMatch(/truncated/i);
-  }, 30_000);
-
-  it('reports a normal tool call as a success', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-tool'));
-    const { events, stop } = collect(p, 'c-tool');
-    await p.sendPromptAndWait('c-tool', 'TOOL_OK please');
-    stop();
-    const kinds = events.map((e) => e.kind);
-    expect(kinds.indexOf('harness.tool_start')).toBeGreaterThanOrEqual(0);
-    expect(kinds.indexOf('harness.tool_complete')).toBeGreaterThan(kinds.indexOf('harness.tool_start'));
-    const complete = events.find(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    expect(complete?.data.success).toBe(true);
-    expect(complete?.data.result).toBe('file body');
-  }, 30_000);
-});
-
-// ── Fire-and-forget ──
-
-describe('OpenCodeProvider — sendPrompt() never produces an unhandled rejection', () => {
-  it('reports an unknown conversation as a caught failure, not a crash', async () => {
-    const p = await startedAgainstFixture();
-    const rejections: unknown[] = [];
-    const onRejection = (e: unknown): void => { rejections.push(e); };
-    process.on('unhandledRejection', onRejection);
-    try {
-      await p.sendPrompt('conversation-that-does-not-exist', 'hi');
-      await new Promise((r) => setTimeout(r, 50));
-    } finally {
-      process.off('unhandledRejection', onRejection);
-    }
-    expect(rejections).toEqual([]);
-  }, 30_000);
-
-  it('broadcasts harness.error when a fire-and-forget turn fails', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-fnf'));
-    const { events, stop } = collect(p, 'c-fnf');
-    await p.sendPrompt('c-fnf', 'ERROR please');
-    await new Promise((r) => setTimeout(r, 500));
-    stop();
-    expect(events.map((e) => e.kind)).toContain('harness.error');
-  }, 30_000);
-});
-
-// ── autoStart ──
-
-describe('OpenCodeProvider — autoStart starts a server and finds its port', () => {
-  it('spawns the configured binary and discovers the ephemeral port it bound', async () => {
-    // `--port 0` means the OS chooses. The address is only knowable by reading
-    // the server's own announcement, which is why the old fixed-port default
-    // could never have worked.
-    const p = await startedAgainstFixture();
-    await expect(p.ping()).resolves.toBe(true);
-  }, 30_000);
-
-  it("reports the spawned server's own failure rather than a blank timeout", async () => {
-    const p = makeProvider({
-      autoStart: true,
-      binaryPath: process.execPath,
-      serveArgs: [SERVE_FIXTURE, 'serve', '--port', '0'],
-      env: { FAKE_OPENCODE_EXIT: '1' },
-      startupTimeoutMs: 5_000,
-    });
-    await expect(p.initialize()).rejects.toThrow(/exited with code 3|address already in use/i);
-  }, 20_000);
-
-  it('reports ENOENT helpfully when the configured binary does not exist', async () => {
-    const p = makeProvider({
-      autoStart: true,
-      binaryPath: 'generatorai-opencode-binary-that-does-not-exist-xyz',
-      serveArgs: ['serve'],
-      startupTimeoutMs: 5_000,
-    });
-    await expect(p.initialize()).rejects.toThrow(/not found/i);
-  }, 20_000);
-
-  it('gives up when the server never announces an address', async () => {
-    const p = makeProvider({
-      autoStart: true,
-      binaryPath: process.execPath,
-      serveArgs: [SERVE_FIXTURE, 'serve', '--port', '0'],
-      env: { FAKE_OPENCODE_NO_ANNOUNCE: '1' },
-      startupTimeoutMs: 800,
-    });
-    await expect(p.initialize()).rejects.toThrow(/did not announce a listening address/i);
-  }, 20_000);
-});
-
-// ── W12: session id round-trip ──
-
-describe('OpenCodeProvider — exposes and resumes its session id', () => {
-  it('getProviderSessionId() returns the id the server issued', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-sid'));
-    expect(p.getProviderSessionId('c-sid')).toMatch(/^ses_/);
-  }, 30_000);
-
-  it('rejoins an existing session via resumeProviderSessionId', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-first'));
-    const sessionId = p.getProviderSessionId('c-first')!;
-
-    await p.createConversation({
-      conversationId: 'c-second',
-      resumeProviderSessionId: sessionId,
-    } as CreateConversationParams);
-    expect(p.getProviderSessionId('c-second')).toBe(sessionId);
-  }, 30_000);
-
-  it('refuses to resume a session the server does not have', async () => {
-    // Silently starting a fresh session here is how a recycle loses the whole
-    // conversation without anyone noticing.
-    const p = await startedAgainstFixture();
-    await expect(p.createConversation({
-      conversationId: 'c-ghost',
-      resumeProviderSessionId: 'ses_does_not_exist',
-    } as CreateConversationParams)).rejects.toThrow(/cannot resume session/i);
-  }, 30_000);
-});
-
-// ── Defect: every session inherited the SERVER's cwd ──
-//
-// The provider spawned `opencode serve` with no `cwd` and created every
-// session with no project, so one shared server rooted every chat — whatever
-// workspace it was bound to — in whatever directory the GeneratorAI server
-// happened to start in. `?directory=` is the query parameter every endpoint in
-// `schemas/opencode/openapi.json` accepts for exactly this.
-
-describe('OpenCodeProvider — per-conversation project directory', () => {
-  /** A server that answers just enough to create a session and read it back. */
-  async function directoryHarness(): Promise<Harness> {
-    return startHarness((req, res, _body, _h) => {
-      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-      if (url.pathname === '/event') { sse(res); return; }
-      if (url.pathname === '/session' && req.method === 'GET') { json(res, 200, []); return; }
-      if (url.pathname === '/session' && req.method === 'POST') {
-        json(res, 200, { id: 'ses_1', directory: url.searchParams.get('directory') });
-        return;
-      }
-      if (url.pathname === '/session/ses_1/message') { json(res, 200, []); return; }
-      json(res, 200, {});
-    });
-  }
-
-  /** The `?directory=` value of the first request to `path`. */
-  function directoryOf(h: Harness, method: string, pathname: string): string | null | undefined {
-    const rec = h.requests.find(
-      (r) => r.method === method && new URL(r.url, 'http://x').pathname === pathname,
-    );
-    if (!rec) return undefined;
-    return new URL(rec.url, 'http://x').searchParams.get('directory');
-  }
-
-  it('creates the session against params.workingDirectory', async () => {
-    const h = await directoryHarness();
-    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
-    await p.initialize();
-    await p.createConversation({
-      conversationId: 'c-dir',
+describe('a session carries explicit rules, metadata, instructions and environment', () => {
+  it('creates the session at the working directory with the mode rules, owner metadata and model variant', async () => {
+    const p = await started();
+    await p.getModels();
+    await p.createConversation(CONV('c1', {
       workingDirectory: '/work/repo',
-    } as CreateConversationParams);
+      additionalDirectories: ['/work/other'],
+      model: 'anthropic/claude-sonnet-5-5',
+      reasoningEffort: 'high',
+      permissionMode: 'default',
+      systemMessage: { mode: 'append', content: 'SYSTEM APPEND' },
+      env: { GENERATORAI_SCRATCH_DIR: '/scratch' },
+    }));
+    const reqs = await recorded(p);
+    const create = reqs.find((r) => r.method === 'POST' && r.path === '/api/session')!;
+    expect(create.body.location).toEqual({ directory: '/work/repo' });
+    expect(create.body.model).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-5-5', variant: 'high' });
+    expect(create.body.metadata).toEqual({ [OWNER_METADATA_KEY]: 'c1' });
+    const rules = create.body.permissions as Array<{ action: string; resource: string; effect: string }>;
+    expect(rules[0]).toEqual({ action: '*', resource: '*', effect: 'ask' });
+    expect(rules).toContainEqual({ action: 'read', resource: '*', effect: 'allow' });
+    expect(rules).toContainEqual({ action: 'external_directory', resource: '/work/other/*', effect: 'allow' });
+    expect(rules.at(-1)).toEqual({ action: 'execute', resource: '*', effect: 'deny' });
+    expect(rules).not.toContainEqual({ action: 'edit', resource: '*', effect: 'allow' });
 
-    expect(directoryOf(h, 'POST', '/session')).toBe('/work/repo');
-  }, 20_000);
+    const sessions = await testHook<Array<{ id: string; env: Record<string, string>; instructions: Record<string, string> }>>(urlOf(p), 'sessions');
+    const s = sessions.find((x) => x.id === p.getProviderSessionId('c1'))!;
+    expect(s.instructions[INSTRUCTION_KEY]).toBe('SYSTEM APPEND');
+    expect(s.env['GENERATORAI_SCRATCH_DIR']).toBe('/scratch');
+    expect(s.env['PATH']).toBeDefined();
+  });
 
-  it('carries the directory on session-scoped calls too, not just the create', async () => {
-    const h = await directoryHarness();
-    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
-    await p.initialize();
-    await p.createConversation({
-      conversationId: 'c-dir2',
-      workingDirectory: '/work/repo',
-    } as CreateConversationParams);
-    await p.getMessages('c-dir2');
+  it("bypassPermissions allows everything but still keeps Code Mode off; acceptEdits allows edits", async () => {
+    const p = await started();
+    await p.createConversation(CONV('bypass', { permissionMode: 'bypassPermissions' }));
+    await p.createConversation(CONV('edits', { permissionMode: 'acceptEdits' }));
+    const creates = (await recorded(p)).filter((r) => r.method === 'POST' && r.path === '/api/session');
+    expect(creates[0]!.body.permissions[0]).toEqual({ action: '*', resource: '*', effect: 'allow' });
+    expect(creates[0]!.body.permissions.at(-1)).toEqual({ action: 'execute', resource: '*', effect: 'deny' });
+    expect(creates[1]!.body.permissions).toContainEqual({ action: 'edit', resource: '*', effect: 'allow' });
+  });
 
-    expect(directoryOf(h, 'GET', '/session/ses_1/message')).toBe('/work/repo');
-  }, 20_000);
+  it("a turn's mode is applied to the session before the prompt, and only when it changes", async () => {
+    const p = await started();
+    await p.createConversation(CONV('m', { permissionMode: 'bypassPermissions' }));
+    await p.sendPromptAndWait('m', 'hi', undefined, undefined, { agentMode: 'plan' });
+    await p.sendPromptAndWait('m', 'hi again', undefined, undefined, { agentMode: 'plan' });
+    const reqs = await recorded(p);
+    const patches = reqs.filter((r) => r.method === 'PATCH');
+    expect(patches).toHaveLength(1);
+    expect(patches[0]!.body.permissions[0]).toEqual({ action: '*', resource: '*', effect: 'ask' });
+    const firstPrompt = reqs.findIndex((r) => r.path.endsWith('/prompt'));
+    expect(reqs.indexOf(patches[0]!)).toBeLessThan(firstPrompt);
+  });
 
-  it('falls back to opts.defaultCwd, and sends nothing when neither is set', async () => {
-    const h1 = await directoryHarness();
-    const p1 = makeProvider({ baseUrl: h1.baseUrl, defaultCwd: '/server/root', defaultProviderId: 'opencode' });
-    await p1.initialize();
-    await p1.createConversation(CONV('c-dir3'));
-    expect(directoryOf(h1, 'POST', '/session')).toBe('/server/root');
-
-    const h2 = await directoryHarness();
-    const p2 = makeProvider({ baseUrl: h2.baseUrl, defaultProviderId: 'opencode' });
-    await p2.initialize();
-    await p2.createConversation(CONV('c-dir4'));
-    expect(directoryOf(h2, 'POST', '/session')).toBeNull();
-  }, 20_000);
-
-  it('opens the extra roots to the session through its external_directory rules', async () => {
-    const h = await directoryHarness();
-    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
-    await p.initialize();
-    await p.createConversation({
-      conversationId: 'c-dir5',
-      workingDirectory: '/work/repo',
-      additionalDirectories: ['/work/docs'],
-    } as CreateConversationParams);
-
-    const create = h.requests.find((r) => r.method === 'POST' && new URL(r.url, 'http://x').pathname === '/session');
-    expect((create!.body as { permission: unknown }).permission).toEqual(externalDirectoryRules(['/work/docs']));
-    expect(p.getConversationWarnings('c-dir5')).toEqual([]);
-  }, 20_000);
-
-  it('a live rebind re-sets the rules in place and keeps the session', async () => {
-    const h = await directoryHarness();
-    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
-    await p.initialize();
-    const base = { conversationId: 'c-dir6', workingDirectory: '/work/repo' } as CreateConversationParams;
-    await p.createConversation(base);
-    await p.resumeConversation('c-dir6', { ...base, additionalDirectories: ['/work/api'] });
-
-    const patch = h.requests.find((r) => r.method === 'PATCH' && new URL(r.url, 'http://x').pathname === '/session/ses_1');
-    expect((patch!.body as { permission: unknown }).permission).toEqual(externalDirectoryRules(['/work/api']));
-    expect(h.requests.filter((r) => r.method === 'POST' && new URL(r.url, 'http://x').pathname === '/session')).toHaveLength(1);
-  }, 20_000);
-
-  it('a moved working directory starts a session there and reports the restart', async () => {
-    const h = await directoryHarness();
-    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
-    await p.initialize();
-    const base = { conversationId: 'c-dir7', workingDirectory: '/work/repo' } as CreateConversationParams;
-    await p.createConversation(base);
-    await p.resumeConversation('c-dir7', { ...base, workingDirectory: '/work/api' });
-
-    const creates = h.requests.filter((r) => r.method === 'POST' && new URL(r.url, 'http://x').pathname === '/session');
-    expect(creates.map((r) => new URL(r.url, 'http://x').searchParams.get('directory'))).toEqual(['/work/repo', '/work/api']);
-    expect(p.getConversationWarnings('c-dir7')).toEqual([
-      expect.objectContaining({ code: 'CONVERSATION_RESTARTED' }),
-    ]);
-  }, 20_000);
+  it('warns honestly about what OpenCode cannot take', async () => {
+    const p = await started();
+    await p.createConversation(CONV('w', {
+      systemMessage: { mode: 'replace', content: 'x' },
+      customAgents: [{ name: 'a', description: 'd', instructions: 'i' }],
+      maxTurns: 3,
+      model: 'bare-model',
+    }));
+    const fields = p.getConversationWarnings('w').map((w) => w.params['field']);
+    expect(fields).toEqual(expect.arrayContaining(['systemMessage.mode', 'customAgents', 'maxTurns', 'model']));
+  });
 });
 
-describe('an OpenCode 2 server is refused with a reason, not a timeout', () => {
-  it('names OpenCode 2 when /session is 404 and /api/session answers', async () => {
-    const h = await startHarness((req, res) => {
-      if (req.url?.startsWith('/api/session')) return json(res, 200, []);
-      return json(res, 404, { error: 'not found' });
+describe('a turn', () => {
+  it('streams deltas, closes each step with its message id, and reports usage and context', async () => {
+    const p = await started();
+    await p.getModels();
+    await p.createConversation(CONV('t', { model: 'anthropic/claude-sonnet-5-5', autoCompact: { enabled: true, thresholdPct: 80 } }));
+    const events = collect(p, 't');
+    const res = await p.sendPromptAndWait('t', 'say hello');
+    expect(res.content).toBe('hello world');
+    const tokens = events.filter((e) => e.kind === 'harness.token').map((e) => (e.data as { text: string }).text);
+    expect(tokens.join('')).toBe('hello world');
+    const done = events.find((e) => e.kind === 'harness.message_complete')!.data as { content: string; providerMessageId: string };
+    expect(done.content).toBe('hello world');
+    expect(done.providerMessageId).toMatch(/^msg_/);
+    const usage = events.find((e) => e.kind === 'harness.usage')!.data as unknown as Record<string, unknown>;
+    expect(usage).toMatchObject({ inputTokens: 1200, outputTokens: 35, cacheReadTokens: 800, costUsd: 0.001 });
+    const ctx = events.find((e) => e.kind === 'harness.context_usage')!.data as unknown as Record<string, unknown>;
+    expect(ctx).toMatchObject({ currentTokens: 2030, promptTokenLimit: 1_000_000, compactionThreshold: 800_000, source: 'derived' });
+    expect(kinds(events).at(-1)).toBe('harness.idle');
+  });
+
+  it('streams reasoning and completes it', async () => {
+    const p = await started();
+    await p.createConversation(CONV('r'));
+    const events = collect(p, 'r');
+    await p.sendPromptAndWait('r', 'REASON');
+    expect(events.filter((e) => e.kind === 'harness.reasoning_delta').map((e) => (e.data as { text: string }).text).join('')).toBe('let me think');
+    expect(events.find((e) => e.kind === 'harness.reasoning_complete')?.data).toEqual({ content: 'let me think' });
+  });
+
+  it('a failed run rejects and reports the error', async () => {
+    const p = await started();
+    await p.createConversation(CONV('f'));
+    const events = collect(p, 'f');
+    await expect(p.sendPromptAndWait('f', 'FAIL_TURN')).rejects.toThrow('model exploded');
+    expect(kinds(events)).toContain('harness.error');
+  });
+
+  it('sends attachments as file:// URIs', async () => {
+    const p = await started();
+    await p.createConversation(CONV('a'));
+    await p.sendPromptAndWait('a', 'look', [{ type: 'file', path: join(tmpdir(), 'pic.png'), displayName: 'pic.png' }]);
+    const prompt = (await recorded(p)).find((r) => r.path.endsWith('/prompt'))!;
+    expect(prompt.body.files[0].uri).toMatch(/^file:\/\/.*pic\.png$/);
+    expect(prompt.body.files[0].name).toBe('pic.png');
+  });
+
+  it('abort interrupts the run and the conversation stays usable', async () => {
+    const p = await started();
+    await p.createConversation(CONV('x'));
+    const events = collect(p, 'x');
+    const turn = p.sendPromptAndWait('x', 'HANG forever');
+    await new Promise((r) => setTimeout(r, 150));
+    await p.abortConversation('x');
+    await expect(turn).resolves.toMatchObject({ content: 'thinking ' });
+    expect(kinds(events)).toContain('harness.cancelled');
+    expect(kinds(events)).not.toContain('harness.error');
+    await expect(p.sendPromptAndWait('x', 'again')).resolves.toMatchObject({ content: 'hello world' });
+  });
+});
+
+describe('gates', () => {
+  it('routes a permission ask to onPermissionRequest and replies once', async () => {
+    const p = await started();
+    const asked: unknown[] = [];
+    await p.createConversation(CONV('p', { onPermissionRequest: async (r) => { asked.push(r); return { granted: true }; } }));
+    const events = collect(p, 'p');
+    await p.sendPromptAndWait('p', 'ASK_PERMISSION');
+    expect(asked[0]).toMatchObject({ type: 'shell_exec', description: 'Run: rm -rf build', details: { action: 'shell', command: 'rm -rf build' } });
+    const reply = (await recorded(p)).find((r) => r.path.includes('/permission/'))!;
+    expect(reply.body).toEqual({ decision: 'once' });
+    expect(events.find((e) => e.kind === 'harness.tool_complete')?.data).toMatchObject({ tool: 'shell', success: true });
+  });
+
+  it('a denial is a reject with the reason; "don\'t ask again" becomes a session rule, never OpenCode\'s project-wide always', async () => {
+    const p = await started();
+    let answer = { granted: false, reason: 'not now' } as { granted: boolean; reason?: string; remember?: boolean };
+    await p.createConversation(CONV('d', { onPermissionRequest: async () => answer }));
+    const events = collect(p, 'd');
+    await p.sendPromptAndWait('d', 'ASK_PERMISSION');
+    expect(events.find((e) => e.kind === 'harness.tool_complete')?.data).toMatchObject({ success: false });
+    answer = { granted: true, remember: true };
+    await p.sendPromptAndWait('d', 'ASK_PERMISSION');
+    const reqs = await recorded(p);
+    const replies = reqs.filter((r) => r.path.includes('/permission/')).map((r) => r.body);
+    expect(replies).toEqual([{ decision: 'reject', message: 'not now' }, { decision: 'once' }]);
+    const patch = reqs.filter((r) => r.method === 'PATCH').at(-1)!;
+    expect(patch.body.permissions).toContainEqual({ action: 'shell', resource: 'rm *', effect: 'allow' });
+  });
+
+  it('with no handler, an ask is rejected rather than left waiting', async () => {
+    const p = await started();
+    await p.createConversation(CONV('n'));
+    await p.sendPromptAndWait('n', 'ASK_PERMISSION');
+    const reply = (await recorded(p)).find((r) => r.path.includes('/permission/'))!;
+    expect(reply.body.decision).toBe('reject');
+  });
+
+  it('asks the question tool through onQuestionRequest and replies with the picked labels', async () => {
+    const p = await started();
+    const seen: unknown[] = [];
+    await p.createConversation(CONV('q', {
+      onQuestionRequest: async (req) => { seen.push(req); return { answers: { q0: ['bun'], q1: ['lint', 'test'] } }; },
+    }));
+    const res = await p.sendPromptAndWait('q', 'ASK_QUESTION');
+    expect(seen[0]).toMatchObject({
+      questions: [
+        { id: 'q0', header: 'Pkg', question: 'Which package manager?', multiSelect: false, allowFreeform: true, options: [{ label: 'bun', description: 'fast' }, { label: 'npm' }] },
+        { id: 'q1', multiSelect: true },
+      ],
     });
-    const p = makeProvider({ baseUrl: h.baseUrl });
-    await expect(p.initialize()).rejects.toThrow(/OpenCode 2/);
-    expect(await p.ping()).toBe(false);
+    expect(res.content).toBe('answered:{"q0":"bun","q1":["lint","test"]}');
+  });
+
+  it('a free reply instead of an answer cancels the form with the reply as feedback', async () => {
+    const p = await started();
+    await p.createConversation(CONV('q2', { onQuestionRequest: async () => ({ answers: {}, freeformResponse: 'use pnpm' }) }));
+    expect((await p.sendPromptAndWait('q2', 'ASK_QUESTION')).content).toBe('cancelled:use pnpm');
+  });
+
+  it('a form that is not a question is cancelled with a reason the model can act on', async () => {
+    const p = await started();
+    await p.createConversation(CONV('e', { onQuestionRequest: async () => ({ answers: {} }) }));
+    expect((await p.sendPromptAndWait('e', 'ELICIT')).content).toMatch(/^cancelled:GeneratorAI cannot show this form/);
+  });
+});
+
+describe('host tools over client-hosted MCP', () => {
+  const echo = (calls: unknown[]): ToolDefinition => ({
+    name: 'echo',
+    description: 'echo',
+    parametersSchema: { type: 'object', properties: { value: { type: 'number' } } },
+    handler: async (args) => { calls.push(args); return { echoed: args['value'] }; },
+  });
+
+  it('lists the platform tools at the location and runs the calling conversation\'s handler', async () => {
+    const p = await started();
+    const calls: unknown[] = [];
+    await p.createConversation(CONV('h', { workingDirectory: '/proj', tools: [echo(calls)] }));
+    const mcp = await testHook<Record<string, string[]>>(urlOf(p), 'mcp');
+    expect(mcp['/proj']).toEqual(['echo']);
+    const events = collect(p, 'h');
+    await p.sendPromptAndWait('h', 'HOST_TOOL echo');
+    expect(calls).toEqual([{ value: 42 }]);
+    const start = events.find((e) => e.kind === 'harness.tool_start')!.data as { tool: string };
+    expect(start.tool).toBe('echo'); // `generatorai_echo` on the wire
+    expect(events.find((e) => e.kind === 'harness.tool_complete')?.data).toMatchObject({ result: '{"echoed":42}', success: true });
+  });
+
+  it("a conversation without the tool gets an error, never another chat's handler", async () => {
+    const p = await started();
+    const calls: unknown[] = [];
+    await p.createConversation(CONV('owner', { workingDirectory: '/proj', tools: [echo(calls)] }));
+    await p.createConversation(CONV('other', { workingDirectory: '/proj' }));
+    const events = collect(p, 'other');
+    await p.sendPromptAndWait('other', 'HOST_TOOL echo');
+    expect(calls).toEqual([]);
+    expect(events.find((e) => e.kind === 'harness.tool_complete')?.data).toMatchObject({ success: false });
+  });
+});
+
+describe('subagents', () => {
+  it("forwards a child session's tool calls under the spawning call, without its prose", async () => {
+    const p = await started();
+    await p.createConversation(CONV('s'));
+    const events = collect(p, 's');
+    const res = await p.sendPromptAndWait('s', 'SUBAGENT');
+    expect(res.content).not.toContain('child prose');
+    const starts = events.filter((e) => e.kind === 'harness.tool_start').map((e) => e.data as { tool: string; callId: string; parentToolCallId?: string });
+    const parent = starts.find((s) => s.tool === 'subagent')!;
+    const child = starts.find((s) => s.tool === 'grep')!;
+    expect(child.parentToolCallId).toBe(parent.callId);
   });
 });
 
 describe('compaction (docs/compaction)', () => {
-  const infos = (events: AgentEvent[]) =>
-    events
-      .filter((e) => e.kind === 'harness.session_info')
-      .map((e) => (e.data as { infoType: string; trigger?: string }))
-      .filter((d) => d.infoType.startsWith('compact'))
-      .map((d) => `${d.infoType}:${d.trigger}`);
-  const baseOf = (p: OpenCodeProvider) => (p as unknown as { baseUrl: string }).baseUrl;
-
-  it('declares native compaction without instructions', async () => {
-    const p = makeProvider({ baseUrl: 'http://127.0.0.1:1' });
-    expect(p.capabilities()).toMatchObject({ conversationCompact: true, compactInstructions: false });
+  it('manual: start, one boundary with the summary, then idle', async () => {
+    const p = await started();
+    await p.createConversation(CONV('k'));
+    await p.sendPromptAndWait('k', 'hi');
+    const events = collect(p, 'k');
+    await p.compactConversation('k');
+    expect(infos(events)).toEqual(['compaction_start', 'compact_boundary']);
+    const boundary = events.find((e) => e.kind === 'harness.session_info' && (e.data as { infoType: string }).infoType === 'compact_boundary')!.data;
+    expect(boundary).toMatchObject({ trigger: 'manual', summary: 'SUMMARY', preTokens: 2030 });
+    expect(kinds(events).at(-1)).toBe('harness.idle');
+    // the conversation keeps working
+    await expect(p.sendPromptAndWait('k', 'more')).resolves.toMatchObject({ content: 'hello world' });
   });
 
-  it('summarises with the conversation model and reports start, one boundary, then idle', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation({ ...CONV('c-compact'), model: 'opencode/big' });
-    const { events } = collect(p, 'c-compact');
-    await p.compactConversation('c-compact');
-    // The stream's `session.compacted` may land after the request returned; give it a moment.
+  it('a failed compaction rejects and is reported', async () => {
+    const p = await started();
+    await p.createConversation(CONV('kf'));
+    await testHook(urlOf(p), 'knobs', { compact: 'fail' });
+    const events = collect(p, 'kf');
+    await expect(p.compactConversation('kf')).rejects.toThrow('summary failed');
+    expect(infos(events)).toEqual(['compaction_start', 'compaction_failed']);
+  });
+
+  it('a compaction can be stopped', async () => {
+    const p = await started();
+    await p.createConversation(CONV('ks'));
+    await testHook(urlOf(p), 'knobs', { compact: 'hang' });
+    const events = collect(p, 'ks');
+    const run = p.compactConversation('ks');
     await new Promise((r) => setTimeout(r, 100));
-    expect(infos(events)).toEqual(['compaction_start:manual', 'compact_boundary:manual']);
-    expect(events.at(-1)?.kind === 'harness.idle' || events.some((e) => e.kind === 'harness.idle')).toBe(true);
-    // The summary message on the stream is not the agent's reply.
-    expect(events.some((e) => e.kind === 'harness.token')).toBe(false);
-    const sent = await (await fetch(`${baseOf(p)}/__fake/summarize`)).json();
-    expect(sent).toMatchObject({ providerID: 'opencode', modelID: 'big' });
+    await p.abortConversation('ks');
+    await expect(run).rejects.toThrow('Compaction stopped');
+    expect(kinds(events)).toContain('harness.cancelled');
   });
 
-  it('falls back to the server default model for a session created without one', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-compact-default'));
-    await p.compactConversation('c-compact-default');
-    const sent = await (await fetch(`${baseOf(p)}/__fake/summarize`)).json();
-    expect(sent).toMatchObject({ providerID: 'opencode', modelID: 'big' });
+  it("reports OpenCode's own compaction inside a turn as auto", async () => {
+    const p = await started();
+    await p.createConversation(CONV('ka'));
+    const events = collect(p, 'ka');
+    await p.sendPromptAndWait('ka', 'AUTO_COMPACT');
+    const auto = events.filter((e) => e.kind === 'harness.session_info').map((e) => e.data as unknown as { infoType: string; trigger: string; summary?: string });
+    expect(auto.map((a) => [a.infoType, a.trigger])).toEqual([['compaction_start', 'auto'], ['compact_boundary', 'auto']]);
+    expect(auto[1]!.summary).toBe('auto summary');
   });
 
-  it('rejects and reports a failed compaction', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation({ ...CONV('c-compact-fail'), model: 'opencode/fail' });
-    const { events } = collect(p, 'c-compact-fail');
-    await expect(p.compactConversation('c-compact-fail')).rejects.toThrow(/summarize failed with 400/);
-    expect(infos(events)).toEqual(['compaction_start:manual', 'compaction_failed:manual']);
-    expect(events.some((e) => e.kind === 'harness.idle')).toBe(true);
+  it("writes the app's setting into GeneratorAI's own config layer", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-cfg-'));
+    const configFile = join(dir, 'generatorai.json');
+    const p = await started({ configFile });
+    await p.createConversation(CONV('cfg', { autoCompact: { enabled: true, thresholdPct: 70 }, skillDirectories: ['/skills/a'] }));
+    const cfg = JSON.parse(readFileSync(configFile, 'utf8'));
+    expect(cfg).toMatchObject({ compaction: { auto: true, buffer: '30%' }, skills: ['/skills/a'] });
+    await p.resumeConversation('cfg', CONV('cfg', { autoCompact: { enabled: false } }));
+    expect(JSON.parse(readFileSync(configFile, 'utf8')).compaction).toEqual({ auto: false });
+  });
+});
+
+describe('fork, rewind and resume', () => {
+  it('forks through an anchor (copying before the next message) and maps the re-keyed ids', async () => {
+    const p = await started();
+    await p.createConversation(CONV('src'));
+    const anchors: string[] = [];
+    p.onConversationEvent('src', (e) => { if (e.kind === 'harness.message_complete') anchors.push((e.data as { providerMessageId: string }).providerMessageId); });
+    await p.sendPromptAndWait('src', 'one');
+    await p.sendPromptAndWait('src', 'two');
+    const result = await p.forkConversation('src', { newConversationId: 'fork', throughAnchor: { kind: 'message', id: anchors[0]! }, params: CONV('fork') });
+    const fork = (await recorded(p)).find((r) => r.path.endsWith('/fork'))!;
+    const sessions = await testHook<Array<{ id: string; metadata: Record<string, string>; messages: Array<{ id: string }> }>>(urlOf(p), 'sessions');
+    const src = sessions.find((s) => s.id === p.getProviderSessionId('src'))!;
+    expect(fork.body.before).toBe(src.messages[2]!.id); // [user1, assistant1, user2, assistant2]
+    const forked = sessions.find((s) => s.id === result.providerSessionId)!;
+    expect(forked.messages).toHaveLength(2);
+    expect(result.anchorMap?.[anchors[0]!]).toBe(forked.messages[1]!.id);
+    expect(forked.metadata[OWNER_METADATA_KEY]).toBe('fork');
+    expect(p.hasLiveConversation('fork')).toBe(true);
   });
 
-  it('stops a running compaction', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation({ ...CONV('c-compact-slow'), model: 'opencode/slow' });
-    const { events } = collect(p, 'c-compact-slow');
-    const running = p.compactConversation('c-compact-slow');
+  it('rewinds by staging and committing a revert at the first dropped message, files untouched', async () => {
+    const p = await started();
+    await p.createConversation(CONV('rw'));
+    const anchors: string[] = [];
+    p.onConversationEvent('rw', (e) => { if (e.kind === 'harness.message_complete') anchors.push((e.data as { providerMessageId: string }).providerMessageId); });
+    await p.sendPromptAndWait('rw', 'one');
+    await p.sendPromptAndWait('rw', 'two');
+    await p.rewindConversation('rw', { keepThrough: { kind: 'message', id: anchors[0]! }, droppedTurns: 1, params: CONV('rw') });
+    const stage = (await recorded(p)).find((r) => r.path.endsWith('/revert/stage'))!;
+    expect(stage.body.files).toBe(false);
+    const sessions = await testHook<Array<{ id: string; messages: unknown[] }>>(urlOf(p), 'sessions');
+    expect(sessions.find((s) => s.id === p.getProviderSessionId('rw'))!.messages).toHaveLength(2);
+    expect((await p.getMessages('rw')).map((m) => m.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('resumes a persisted session (re-applying rules and environment) and refuses one OpenCode no longer has', async () => {
+    const p = await started();
+    await p.createConversation(CONV('orig'));
+    const sid = p.getProviderSessionId('orig')!;
+    const q = await started({ autoStart: false, baseUrl: urlOf(p), password: (p as unknown as { server: { password: string } }).server.password });
+    await q.createConversation(CONV('orig', { resumeProviderSessionId: sid, permissionMode: 'acceptEdits' }));
+    expect(q.getProviderSessionId('orig')).toBe(sid);
+    const patch = (await recorded(p)).filter((r) => r.method === 'PATCH').at(-1)!;
+    expect(patch.body.permissions).toContainEqual({ action: 'edit', resource: '*', effect: 'allow' });
+    expect(await q.providerSessionExists(sid)).toBe(true);
+    expect(await q.providerSessionExists('ses_gone')).toBe(false);
+    await expect(q.createConversation(CONV('gone', { resumeProviderSessionId: 'ses_gone' }))).rejects.toThrow(/no longer has it/);
+  });
+});
+
+describe('unattended recovery', () => {
+  it('on connect, interrupts a session of ours the server still runs — and leaves other sessions alone', async () => {
+    const ext = await externalServer();
+    const create = async (metadata: Record<string, string>) =>
+      ((await (await fetch(`${ext.url}/api/session`, { method: 'POST', headers: { Authorization: ext.auth }, body: JSON.stringify({ metadata }) })).json()) as { data: { id: string } }).data.id;
+    const ours = await create({ [OWNER_METADATA_KEY]: 'old-chat' });
+    const theirs = await create({});
+    await testHook(ext.url, 'active', { sessionID: ours });
+    await testHook(ext.url, 'active', { sessionID: theirs });
+    const p = await started({ autoStart: false, baseUrl: ext.url, password: ext.password });
+    const interrupts = (await recorded(p)).filter((r) => r.path.endsWith('/interrupt')).map((r) => r.path);
+    expect(interrupts).toEqual([`/api/session/${ours}/interrupt`]);
+  });
+
+  it('shutdown interrupts every in-flight turn before it lets go', async () => {
+    const ext = await externalServer();
+    const p = await started({ autoStart: false, baseUrl: ext.url, password: ext.password });
+    await p.createConversation(CONV('busy'));
+    const sid = p.getProviderSessionId('busy')!;
+    const turn = p.sendPromptAndWait('busy', 'HANG forever').catch((e: unknown) => e);
     await new Promise((r) => setTimeout(r, 150));
-    await p.abortConversation('c-compact-slow');
-    await expect(running).rejects.toThrow(/stopped/i);
-    expect(events.some((e) => e.kind === 'harness.cancelled')).toBe(true);
-    // The conversation takes a prompt again.
-    await expect(p.sendPromptAndWait('c-compact-slow', 'hi')).resolves.toMatchObject({ content: 'hello ' });
+    await p.shutdown();
+    await turn;
+    const reqs = (await testHook<Recorded[]>(ext.url, 'requests')).map((r) => r.path);
+    expect(reqs).toContain(`/api/session/${sid}/interrupt`);
+  });
+});
+
+describe('catalog and agents', () => {
+  it('lists usable chat models with limits, vision and effort variants', async () => {
+    const p = await started();
+    const models = await p.getModels();
+    expect(models.map((m) => m.id)).toEqual(['anthropic/claude-sonnet-5-5', 'openai/gpt-5.6-terra']);
+    expect(models[0]).toMatchObject({ isDefault: true, supportsVision: true, supportsReasoning: true, reasoningEfforts: ['low', 'high', 'max'], promptTokenLimit: 1_000_000, maxOutputTokens: 64_000 });
+    expect(models[1]).toMatchObject({ supportsVision: false, supportsReasoning: false, promptTokenLimit: 200_000, totalContextWindow: 258_000 });
   });
 
-  it("reports OpenCode's own compaction once, as auto, inside a turn", async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation(CONV('c-overflow'));
-    const { events } = collect(p, 'c-overflow');
-    await p.sendPromptAndWait('c-overflow', 'OVERFLOW');
-    expect(infos(events)).toEqual(['compaction_start:auto', 'compact_boundary:auto']);
-    const boundary = events.find((e) => (e.data as { infoType?: string }).infoType === 'compact_boundary');
-    expect((boundary?.data as { summary?: string }).summary).toBe('auto summary');
-  });
-
-  it('says the auto-compaction setting is not applied', async () => {
-    const p = await startedAgainstFixture();
-    await p.createConversation({ ...CONV('c-ac-off'), autoCompact: { enabled: false } });
-    await p.createConversation({ ...CONV('c-ac-default'), autoCompact: { enabled: true } });
-    expect(p.getConversationWarnings('c-ac-off')).toEqual([
-      expect.objectContaining({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: expect.objectContaining({ field: 'autoCompact' }) }),
-    ]);
-    expect(p.getConversationWarnings('c-ac-default')).toEqual([]);
+  it('lists primary, visible agents and switches the session agent', async () => {
+    const p = await started();
+    await p.createConversation(CONV('ag'));
+    expect((await p.listAgents('ag')).map((a) => a.name)).toEqual(['build', 'plan']);
+    await p.selectAgent('ag', 'plan');
+    const sw = (await recorded(p)).find((r) => r.method === 'POST' && r.path.endsWith('/agent'))!;
+    expect(sw.body).toEqual({ agent: 'plan' });
+    await p.selectAgent('ag', 'general');
+    expect(p.getConversationWarnings('ag').map((w) => w.code)).toContain('AGENT_NOT_REGISTERED');
   });
 });

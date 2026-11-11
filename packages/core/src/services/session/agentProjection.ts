@@ -280,11 +280,12 @@ export async function deliverSkills(
     ];
   }
   if (levels.skills === 'directories') {
-    return provider === 'codex' && dirs.length > 0
+    // Codex (`skills/extraRoots/set`) and OpenCode (its `skills` config) take skill directories per server process.
+    return (provider === 'codex' || provider === 'opencode') && dirs.length > 0
       ? [
           {
             code: 'skills_process_global',
-            message: 'Codex scopes skill directories to its process, so other Codex sessions also see these skills',
+            message: `${provider === 'codex' ? 'Codex' : 'OpenCode'} scopes skill directories to its process, so other ${provider === 'codex' ? 'Codex' : 'OpenCode'} sessions also see these skills`,
             params: { provider },
           },
         ]

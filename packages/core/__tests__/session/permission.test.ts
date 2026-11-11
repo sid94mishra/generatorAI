@@ -9,20 +9,9 @@ import {
   runPermissionSource,
   turnOptionsFrom,
 } from '../../src/services/session/permissionSource.js';
-import { bootCore, type TestEnv } from './boot.js';
-import { AgentResolver } from '../../src/services/AgentResolver.js';
-import type { InvocationContext } from '../../src/services/workflow-invocation/types.js';
 
-const envs: TestEnv[] = [];
-/** The local owner starting a run (the invocation's trusted context). */
-const LOCAL: InvocationContext = {
-  principal: { kind: 'local', id: 'local', scopes: ['exec:agent', 'read:workflows', 'write:workflows', 'admin:settings'] },
-  trigger: { kind: 'user', client: 'test', principalId: 'local' },
-  loopback: true,
-};
 const posture = getDefaultChatPermissionMode();
 afterEach(() => {
-  for (const e of envs.splice(0)) e.dispose();
   setDefaultChatPermissionMode(posture);
 });
 
@@ -59,66 +48,13 @@ describe('run permission layers (W-07, PD-18)', () => {
 });
 
 describe('PD-17 — gating level vs run mode', () => {
-  it('a provider that never asks refuses default and plan; Codex warns; per-call allows all', () => {
-    expect(() => checkPermissionGating('opencode', 'default')).toThrow(/cannot run under the 'default'/);
-    expect(() => checkPermissionGating('opencode', 'plan')).toThrow(expect.objectContaining({ code: 'PERMISSION_GATING_UNSUPPORTED' }));
-    expect(checkPermissionGating('opencode', 'acceptEdits')).toEqual({});
-    expect(checkPermissionGating('codex', 'default').warning?.code).toBe('permission_gating_exec_and_patch');
-    expect(checkPermissionGating('codex', 'plan')).toEqual({});
+  it('per-call providers (OpenCode 2 among them) hold every mode; Codex warns', () => {
     for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions']) {
       expect(checkPermissionGating('claude-agent', mode)).toEqual({});
+      expect(checkPermissionGating('opencode', mode)).toEqual({});
     }
-  });
-
-  it('a run is refused at start when a stage provider cannot hold its mode', async () => {
-    const env = bootCore();
-    envs.push(env);
-    const def = await env.services.workflowDefinitionService.createFromSpec(
-      {
-        formatVersion: 2,
-        workflow: { name: 'refused', session: { harnessType: 'opencode', permissionMode: 'default' } },
-        stages: [{ kind: 'agent', key: 's', name: 'Build', prompts: [{ label: 'p', text: 'x' }] }],
-        edges: [],
-      },
-      { canEditCommands: true, status: 'published' },
-    );
-    await expect(
-      env.services.workflowInvocationService.invoke({ target: { kind: 'definition', workflowDefinitionId: def.id } }, LOCAL),
-    ).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
-    // The same run on accept-edits (the run row) is allowed through the check.
-    const ok = await env.services.workflowRunService.createRun({
-      workflowDefinitionId: def.id,
-      definitionVersionId: def.currentVersionId!,
-      variables: {},
-      trigger: LOCAL.trigger,
-      permissionMode: 'acceptEdits',
-    });
-    expect(await env.services.workflowRunService.getPermissionMode(ok.id)).toBe('acceptEdits');
-    // R8 — and cannot be switched to a mode the provider cannot hold mid-run.
-    await expect(env.services.workflowRunService.setPermissionMode(ok.id, 'default')).rejects.toMatchObject({
-      code: 'PERMISSION_GATING_UNSUPPORTED',
-    });
-  });
-
-  it("R8 — the bound agent's runtime harness is what the start check judges", async () => {
-    const env = bootCore({
-      agentResolver: {
-        resolve: async () => ({ ...AgentResolver.empty(), runtime: { harnessType: 'opencode' } }),
-      } as unknown as AgentResolver,
-    });
-    envs.push(env);
-    const def = await env.services.workflowDefinitionService.createFromSpec(
-      {
-        formatVersion: 2,
-        workflow: { name: 'agent-bound', session: { agentRef: 'global:oc', permissionMode: 'default' } },
-        stages: [{ kind: 'agent', key: 's', name: 'Build', prompts: [{ label: 'p', text: 'x' }] }],
-        edges: [],
-      },
-      { canEditCommands: true, status: 'published' },
-    );
-    await expect(
-      env.services.workflowInvocationService.invoke({ target: { kind: 'definition', workflowDefinitionId: def.id } }, LOCAL),
-    ).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
+    expect(checkPermissionGating('codex', 'default').warning?.code).toBe('permission_gating_exec_and_patch');
+    expect(checkPermissionGating('codex', 'plan')).toEqual({});
   });
 });
 

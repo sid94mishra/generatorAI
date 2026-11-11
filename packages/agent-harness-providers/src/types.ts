@@ -216,103 +216,48 @@ export interface CodexProviderOptions {
 
 // ── W38 — OpenCode provider options ──────────────────────────────────────────
 
+/**
+ * OpenCode 2 (`@opencode/cli` ≥ 2.0.0) over its HTTP API. Either the provider
+ * starts a private server itself (`autoStart` + `binaryPath`, the default
+ * wiring) or it talks to a running one (`baseUrl` + `password`).
+ */
 export interface OpenCodeProviderOptions {
-  /**
-   * Base URL of a running `opencode serve` instance.
-   *
-   * There is deliberately no default. `opencode serve --port` defaults to `0`
-   * — an ephemeral port — so there is no well-known address to assume; the
-   * previous `http://localhost:4096` default was a guess that pointed at
-   * nothing on a default install. Either give the URL, or set `autoStart` and
-   * let the provider read the bound address off the server it starts.
-   */
+  /** A running OpenCode 2 server to use instead of starting one. Needs `password`. */
   baseUrl?: string;
+  /** The external server's password (OpenCode 2 always authenticates; HTTP Basic, user `opencode`). */
+  password?: string;
   /**
-   * Path to the `opencode` binary used to start the server when `autoStart`
-   * is set.
-   */
-  binaryPath?: string;
-  /**
-   * When true, the provider starts `opencode serve` itself if `baseUrl` is
-   * absent or unreachable, and discovers the port the server actually bound.
-   * Default false (connect to an already-running instance).
+   * Start a private `opencode serve --stdio --port 0` (lease-owned: it exits when this process does).
+   * Needs `binaryPath`; see `resolveOpenCodeCommand`.
    */
   autoStart?: boolean;
-  /**
-   * Argument vector for the auto-started server. Defaults to
-   * `['serve', '--hostname', '127.0.0.1', '--port', <port from baseUrl, else 0>]`.
-   * Override to pass extra flags, or to point `autoStart` at a wrapper/stand-in
-   * that takes different arguments.
-   */
-  serveArgs?: string[];
-  /**
-   * Default model, as `providerID/modelID` (e.g. `'opencode/gpt-5'`) — the form
-   * `getModels()` returns. A bare id is resolved against `defaultProviderId`.
-   */
+  /** The executable to spawn (a native OpenCode binary, as `resolveOpenCodeCommand` returns). */
+  binaryPath?: string;
+  /** Arguments before `serve …` (a launcher script, when the resolved command is an interpreter). */
+  binaryArgs?: string[];
+  /** Default model, `providerID/modelID` — the form `getModels()` returns. */
   defaultModel?: string;
+  /** The app's auto-compaction setting at start-up; a conversation's own setting replaces it. */
+  autoCompact?: { enabled: boolean; thresholdPct?: number };
   /**
-   * Provider id used to qualify a bare model name. OpenCode addresses models as
-   * `{ providerID, modelID }`, so an unqualified id cannot be sent as-is; the
-   * conversation records a `FIELD_COERCED` warning when one arrives with no
-   * provider to attach it to.
+   * The config file GeneratorAI owns for the server it starts (`OPENCODE_CONFIG`): compaction and skill
+   * directories. Default: a file of this provider instance's own under the OS temp directory.
    */
-  defaultProviderId?: string;
-  /**
-   * Idle timeout for the shared SSE event stream, in ms — the stream is
-   * abandoned if no frame arrives for this long. OpenCode sends periodic
-   * heartbeats, so silence is a real signal. Default 120_000; 0 disables.
-   */
+  configFile?: string;
+  /** Idle deadline on the event stream (the server sends a heartbeat every 15 s). Default 60_000; 0 disables. */
   sseTimeoutMs?: number;
-  /**
-   * Deadline for a non-streaming HTTP call, in ms. Default 30_000.
-   *
-   * `initialize()` sits on the harness bring-up path, so an unresponsive — as
-   * opposed to refusing — `opencode serve` would otherwise hang boot.
-   */
+  /** Deadline for one HTTP call. Default 30_000. */
   requestTimeoutMs?: number;
-  /**
-   * How long the slower of {prompt response, event stream} may take to catch up
-   * once the other has reported the turn over, in ms. Default 2_000.
-   *
-   * The prompt response and the `/event` stream are separate connections and
-   * settle in either order; on loopback the response reliably wins. Tearing the
-   * turn down on the first of the two to arrive drops whatever the other still
-   * had to say — which, for the stream, is every token of the reply.
-   */
-  settleGraceMs?: number;
-  /**
-   * Wall-clock ceiling on one turn, in ms. Default 0 (disabled).
-   *
-   * Off by default because a long agentic turn is legitimate and the prompt
-   * request itself resolves when the turn ends; set it if you need a hard cap.
-   */
+  /** Wall-clock ceiling on one turn. Default 0 (none). */
   turnTimeoutMs?: number;
-  /**
-   * How long `autoStart` waits for the spawned server to announce its address
-   * and answer, in ms. Default 30_000.
-   */
+  /** How long a started server gets to announce its address. Default 30_000. */
   startupTimeoutMs?: number;
   /**
-   * Authorization header value. A bare token is sent as `Bearer <token>`.
-   * `opencode serve` reads its own credential from `OPENCODE_SERVER_PASSWORD`.
-   */
-  authToken?: string;
-  /**
-   * Environment variables injected into an `autoStart`ed server, on top of the
-   * `childEnv.ts` allowlist. OpenCode runs model-authored tool calls, so it
-   * never inherits the full parent environment.
+   * Environment for the started server and every session's shell commands, on top of the `childEnv.ts`
+   * allowlist. OpenCode runs model-authored commands, so it never inherits the full parent environment.
    */
   env?: Record<string, string | undefined>;
-  /**
-   * Directory an `autoStart`ed `opencode serve` is spawned in, and the fallback
-   * project directory for conversations that name none.
-   *
-   * Without it the server inherited the GeneratorAI server's own cwd — i.e.
-   * every chat, whatever workspace it was bound to, rooted itself in the
-   * GeneratorAI checkout. Per-conversation roots still come from
-   * `CreateConversationParams.workingDirectory`, which the provider sends as
-   * the `?directory=` query parameter every `opencode serve` endpoint accepts.
-   */
+  /** The server's working directory, and the project directory of a conversation that names none. */
   defaultCwd?: string;
   logger?: ILogger;
 }

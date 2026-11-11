@@ -161,7 +161,7 @@ describe('deliverSkills (RV-7, RV-8)', () => {
     expect(existsSync(join(pluginRoot, 'skills', 'review', 'check.sh'))).toBe(true);
   });
 
-  it("copilot ('directories') keeps the directories; codex warns they are process-global; opencode cannot load skills", async () => {
+  it("copilot ('directories') keeps the directories; codex and opencode warn they are process-global", async () => {
     const root = scratch();
     const src = stagedSkills(root);
     const copilot: Record<string, unknown> = { skillDirectories: [src] };
@@ -170,8 +170,8 @@ describe('deliverSkills (RV-7, RV-8)', () => {
     expect((await deliverSkills({ skillDirectories: [src] }, 'codex', root, undefined, 'c')).map((w) => w.code)).toEqual([
       'skills_process_global',
     ]);
-    expect((await deliverSkills({ skills: ['review'] }, 'opencode', root, undefined, 'c')).map((w) => w.code)).toEqual([
-      'skills_unsupported',
+    expect((await deliverSkills({ skillDirectories: [src] }, 'opencode', root, undefined, 'c')).map((w) => w.code)).toEqual([
+      'skills_process_global',
     ]);
   });
 });

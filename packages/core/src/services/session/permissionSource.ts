@@ -65,7 +65,8 @@ export async function turnOptionsFrom(agentMode: AgentMode, source: PermissionMo
  * - `per_call`: every mode is enforceable;
  * - `exec_and_patch` (Codex): `default`/`acceptEdits` ask per command and
  *   patch, not per tool (a warning); `plan` runs in the read-only sandbox;
- * - `none` (opencode): only `bypassPermissions`/`acceptEdits` — `default` and
+ * - `none` (a provider that never asks; none of the built-in ones since
+ *   OpenCode 2): only `bypassPermissions`/`acceptEdits` — `default` and
  *   `plan` cannot be held and are refused.
  * `mode` undefined means the deployment posture.
  */

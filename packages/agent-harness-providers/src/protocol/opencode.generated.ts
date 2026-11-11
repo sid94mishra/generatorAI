@@ -1,514 +1,1775 @@
 // AUTO-GENERATED — do not edit. Run `pnpm generate:schemas` to update.
 // Protocol:        opencode
-// Source artifact: schemas/opencode/openapi.json@1.19.5
-// Captured by:     npx --yes opencode-ai@1.19.5 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json (equivalently: packages/sdk/openapi.json at the opencode v1.19.5 tag with x-codeSamples removed — identical to /doc, checked at 1.18.25)
-// Artifact sha256: eebb56042880e07c354e0ad0a31f70aab45f536adf5b40b6b1fd5abf4663417b
-// Definitions:     472
+// Source artifact: schemas/opencode/openapi.json@2.2.7
+// Captured by:     packages/protocol/openapi.json at the anomalyco/opencode v2.2.7 tag (git show v2.2.7:packages/protocol/openapi.json; sha1 df8d38d2). Equivalently from a running server: OPENCODE_PASSWORD=<pw> opencode serve --stdio --port 0 (reads {"url"} from stdout), then curl -u opencode:<pw> <url>/openapi.json
+// Artifact sha256: a2c9b373ac1e5bb0c8658cb4a9dc5db465e750c3c9e92a7234db65621a71bcd8
+// Definitions:     497
 //
 // The sha256 above is of the upstream file itself. If the pinned dependency
 // changes, this hash and the types below change with it, and CI's
 // `git diff --exit-code` turns that into a failing build instead of a
 // runtime decode error.
 
-export type Event = EventModels_devRefreshed | EventIntegrationUpdated | EventIntegrationConnectionUpdated | EventCatalogUpdated | EventSessionCreated | EventSessionUpdated | EventSessionDeleted | EventMessageUpdated | EventMessageRemoved | EventMessagePartUpdated | EventMessagePartRemoved | EventSessionNextAgentSwitched | EventSessionNextModelSwitched | EventSessionNextMoved | EventSessionNextPrompted | EventSessionNextPromptAdmitted | EventSessionNextContextUpdated | EventSessionNextSynthetic | EventSessionNextShellStarted | EventSessionNextShellEnded | EventSessionNextStepStarted | EventSessionNextStepEnded | EventSessionNextStepFailed | EventSessionNextTextStarted | EventSessionNextTextDelta | EventSessionNextTextEnded | EventSessionNextReasoningStarted | EventSessionNextReasoningDelta | EventSessionNextReasoningEnded | EventSessionNextToolInputStarted | EventSessionNextToolInputDelta | EventSessionNextToolInputEnded | EventSessionNextToolCalled | EventSessionNextToolProgress | EventSessionNextToolSuccess | EventSessionNextToolFailed | EventSessionNextRetried | EventSessionNextCompactionStarted | EventSessionNextCompactionDelta | EventSessionNextCompactionEnded | EventSessionNextRevertStaged | EventSessionNextRevertCleared | EventSessionNextRevertCommitted | EventMessagePartDelta | EventSessionDiff | EventSessionError | EventInstallationUpdated | EventInstallationUpdate_available | EventFileEdited | EventReferenceUpdated | EventPermissionV2Asked | EventPermissionV2Replied | EventPluginAdded | EventProjectDirectoriesUpdated | EventFileWatcherUpdated | EventPtyCreated | EventPtyUpdated | EventPtyExited | EventPtyDeleted | EventQuestionV2Asked | EventQuestionV2Replied | EventQuestionV2Rejected | EventTodoUpdated | EventLspUpdated | EventPermissionAsked | EventPermissionReplied | Event_tui_prompt_append | Event_tui_command_execute | Event_tui_toast_show | Event_tui_session_select | EventMcpToolsChanged | EventMcpBrowserOpenFailed | EventCommandExecuted | EventProjectUpdated | EventSessionStatus | EventSessionIdle | EventQuestionAsked | EventQuestionReplied | EventQuestionRejected | EventSessionCompacted | EventVcsBranchUpdated | EventWorkspaceReady | EventWorkspaceFailed | EventWorkspaceStatus | EventWorktreeReady | EventWorktreeFailed | EventServerConnected | EventGlobalDisposed | EventServerInstanceDisposed;
+export type AbsolutePath = string;
 
-export type QuestionReplied = {
-  sessionID: string;
-  requestID: string;
-  answers: Array<QuestionAnswer>;
+export type Agent_Color = string;
+
+export type Agent_ID = string;
+
+export type Agent_Info = {
+  id: Agent_ID;
+  name: string;
+  model?: Model_Ref;
+  request: Provider_Request;
+  system?: string;
+  description?: string;
+  mode: "subagent" | "primary" | "all";
+  hidden: boolean;
+  color?: Agent_Color;
+  steps?: number;
+  permissions: Permission_Ruleset;
 };
 
-export type QuestionRejected = {
-  sessionID: string;
-  requestID: string;
+export type AgentNotFoundErrorEncoded = {
+  _tag: "AgentNotFoundError";
+  agentID: string;
+  message: string;
 };
 
-export type OAuth = {
+export type Artifact_Capability = "static" | "server-code" | "sqlite" | "durable-objects";
+
+export type Artifact_Content = {
+  info: Artifact_Info;
+  files: Record<string, string>;
+};
+
+export type Artifact_CreateInput = {
+  title: string;
+  files: Record<string, string>;
+  entry?: string;
+  provider?: string;
+  sessionID?: Session_ID;
+};
+
+export type Artifact_ID = string;
+
+export type Artifact_Info = {
+  id: Artifact_ID;
+  provider: Artifact_ProviderIDEncoded;
+  sessionID?: Session_ID;
+  title: string;
+  entry: string;
+  url: string;
+  time: Artifact_Time;
+};
+
+export type Artifact_Provider = {
+  id: Artifact_ProviderIDEncoded;
+  name: string;
+  capabilities: Array<Artifact_Capability>;
+  default: boolean;
+};
+
+export type Artifact_ProviderIDEncoded = string;
+
+export type Artifact_Time = {
+  created: number;
+  updated: number;
+};
+
+export type Artifact_UpdateInput = {
+  title?: string;
+  files: Record<string, string>;
+  entry?: string;
+  sessionID?: Session_ID;
+};
+
+export type ArtifactNotFoundErrorEncoded = {
+  _tag: "ArtifactNotFoundError";
+  artifactID: string;
+  message: string;
+};
+
+export type Command_Info = {
+  name: string;
+  description?: string;
+};
+
+export type CommandExecutionErrorEncoded = {
+  _tag: "CommandExecutionError";
+  command: string;
+  message: string;
+};
+
+export type CommandNotFoundErrorEncoded = {
+  _tag: "CommandNotFoundError";
+  command: string;
+  message: string;
+};
+
+export type Config_AgentEncoded = {
+  model?: string | {
+    providerID: string;
+    model: string;
+    variant?: string;
+  };
+  request?: {
+    headers?: Record<string, string>;
+    body?: Record<string, unknown>;
+  };
+  system?: string;
+  description?: string;
+  mode?: "subagent" | "primary" | "all";
+  hidden?: boolean;
+  color?: string;
+  steps?: number;
+  disabled?: boolean;
+  permissions?: Permission_Ruleset;
+};
+
+export type Config_CommandEncoded = {
+  template: string;
+  description?: string;
+  agent?: string;
+  model?: string | {
+    providerID: string;
+    model: string;
+    variant?: string;
+  };
+  subagent?: boolean;
+  /** Deprecated alias for subagent. */
+  subtask?: boolean;
+};
+
+export type Config_Compaction_Percent = string;
+
+export type Config_DirectoryEncoded = {
+  type: "directory";
+  path: AbsolutePath;
+};
+
+export type Config_DocumentEncoded = {
+  type: "document";
+  path?: AbsolutePath;
+  info: Config_InfoEncoded;
+};
+
+export type Config_Entry = Config_DocumentEncoded | Config_DirectoryEncoded;
+
+export type Config_Formatter_EntryEncoded = {
+  disabled?: boolean;
+  command?: Array<string>;
+  environment?: Record<string, string>;
+  extensions?: Array<string>;
+};
+
+export type Config_InfoEncoded = {
+  $schema?: string;
+  shell?: string;
+  model?: string | {
+    providerID: string;
+    model: string;
+    variant?: string;
+  };
+  default_agent?: string;
+  update?: "disable" | "notify" | "auto";
+  share?: "manual" | "auto" | "disabled";
+  enterprise?: {
+    url?: string;
+  };
+  username?: string;
+  timezone?: string;
+  permissions?: Permission_Ruleset;
+  policies?: Array<{
+    action: "provider.use" | "tool.use" | "integration.connect" | "integration.use" | "mcp.use" | "skill.use" | "plugin.use" | "websearch.use";
+    resource: string;
+    effect: "allow" | "deny";
+  }>;
+  agents?: Record<string, Config_AgentEncoded>;
+  snapshots?: boolean;
+  watcher?: {
+    ignore?: Array<string>;
+  };
+  formatter?: boolean | Record<string, Config_Formatter_EntryEncoded>;
+  lsp?: boolean | (Record<string, {
+    disabled: true;
+  } | Config_LSP_ServerEncoded>);
+  media?: {
+    image?: {
+      auto_resize?: boolean;
+      max_width?: number;
+      max_height?: number;
+      max_base64_bytes?: number;
+    };
+  };
+  tool_output?: {
+    max_lines?: number;
+    max_bytes?: number;
+  };
+  mcp?: {
+    timeout?: {
+      startup?: number;
+      catalog?: number;
+      execution?: number;
+    };
+    servers?: Record<string, Mcp_LocalConfigEncoded | Mcp_RemoteConfigEncoded>;
+  };
+  compaction?: {
+    auto?: boolean;
+    keep?: {
+      tokens?: number;
+    };
+    buffer?: Config_Compaction_Percent | number;
+  };
+  skills?: Array<string>;
+  commands?: Record<string, Config_CommandEncoded>;
+  instructions?: Array<string>;
+  references?: Record<string, string | Config_Reference_GitEncoded | Config_Reference_LocalEncoded>;
+  websearch?: false | ConfigWebSearch_InfoEncoded;
+  plugins?: Array<string | Config_Plugin_EntryEncoded>;
+  worktree?: Config_Worktree;
+  warming?: boolean | Config_WarmingEncoded;
+  providers?: Record<string, Config_ProviderEncoded>;
+  experimental?: {
+    portable_shell_scanner?: boolean;
+    all_flags?: boolean;
+    todo?: boolean;
+    background_compaction?: boolean;
+    media_blob?: boolean;
+    schedules?: boolean;
+    artifacts?: boolean;
+    codemode_vm?: boolean;
+    console_watches?: boolean;
+    part_rows?: boolean;
+    image_generate?: boolean | ({
+      model?: string | {
+        providerID: string;
+        model: string;
+        variant?: string;
+      };
+    });
+    subagent_depth?: number;
+    location_idle_timeout?: string | false;
+    policies?: Array<{
+      action: "provider.use" | "tool.use" | "integration.connect" | "integration.use" | "mcp.use" | "skill.use" | "plugin.use" | "websearch.use";
+      resource: string;
+      effect: "allow" | "deny";
+    }>;
+  };
+};
+
+export type Config_LSP_ServerEncoded = {
+  command: Array<string>;
+  extensions?: Array<string>;
+  disabled?: boolean;
+  env?: Record<string, string>;
+  initialization?: Record<string, unknown>;
+};
+
+export type Config_Model_Capabilities = {
+  tools?: boolean;
+  input?: Array<string>;
+  output?: Array<string>;
+  temperature?: boolean;
+  reasoning?: Config_Model_Reasoning;
+};
+
+export type Config_Model_CostEncoded = {
+  tier?: {
+    type: "context";
+    size: number;
+  };
+  input: Money_USDPerMillionTokens;
+  output: Money_USDPerMillionTokens;
+  cache?: {
+    read?: Money_USDPerMillionTokens;
+    write?: Money_USDPerMillionTokens;
+  };
+};
+
+export type Config_Model_Reasoning = {
+  supported: false;
+} | {
+  supported: true;
+  toggle?: boolean;
+  effort?: Array<string>;
+  budget?: {
+    min?: number;
+    max?: number;
+  };
+};
+
+export type Config_Model_Settings = {
+  compaction?: Provider_Compaction;
+  cache?: Provider_Cache;
+  encoding?: Provider_Encoding;
+} & (Record<string, unknown | null>);
+
+export type Config_Model_VariantSettings = {
+  compaction?: Provider_Compaction;
+  encoding?: Provider_Encoding;
+} & (Record<string, unknown | null>);
+
+export type Config_ModelEncoded = {
+  modelID?: string;
+  type?: Model_Type;
+  family?: string;
+  name?: string;
+  /** Release date as YYYY-MM-DD or YYYY-MM */
+  releaseDate?: string;
+  compatibility?: Model_Compatibility;
+  package?: string;
+  settings?: Config_Model_Settings;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+  capabilities?: Config_Model_Capabilities;
+  variants?: Array<{
+    id: string;
+    settings?: Config_Model_VariantSettings;
+    headers?: Record<string, string>;
+    body?: Record<string, unknown>;
+  }>;
+  cost?: Config_Model_CostEncoded | Array<Config_Model_CostEncoded>;
+  disabled?: boolean;
+  limit?: {
+    context?: number;
+    input?: number;
+    output?: number;
+  };
+};
+
+export type Config_Patch = {
+  shell: string | null;
+};
+
+export type Config_Plugin_EntryEncoded = {
+  package: string;
+  options?: Record<string, unknown>;
+};
+
+export type Config_Provider_Settings = {
+  timeout?: number | false;
+  headerTimeout?: number | false;
+  chunkTimeout?: number | false;
+  compaction?: Provider_Compaction;
+  cache?: Provider_Cache;
+  transport?: Provider_Transport;
+  encoding?: Provider_Encoding;
+} & (Record<string, unknown | null>);
+
+export type Config_ProviderEncoded = {
+  canonical?: Provider_ID;
+  name?: string;
+  env?: Array<string>;
+  package?: string;
+  compatibility?: Provider_Compatibility;
+  settings?: Config_Provider_Settings;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+  models?: Record<string, Config_ModelEncoded>;
+};
+
+export type Config_Reference_GitEncoded = {
+  repository: string;
+  branch?: string;
+  description?: string;
+  hidden?: boolean;
+};
+
+export type Config_Reference_LocalEncoded = {
+  path: string;
+  description?: string;
+  hidden?: boolean;
+};
+
+export type Config_WarmingEncoded = {
+  prompt?: string;
+  interval?: "auto" | string;
+  duration?: string;
+};
+
+export type Config_Worktree = {
+  directory: string;
+};
+
+export type ConfigShell_Option = {
+  path: string;
+  name: string;
+  acceptable: boolean;
+};
+
+export type ConfigWebSearch_InfoEncoded = {
+  provider: "random" | WebSearch_ID;
+};
+
+export type ConflictErrorEncoded = {
+  _tag: "ConflictError";
+  message: string;
+  resource?: string | null;
+};
+
+export type Connection_CredentialInfo = {
+  type: "credential";
+  id: Credential_ID;
+  label: string;
+  method: "key" | "oauth" | "external";
+  status?: Connection_Status;
+};
+
+export type Connection_EnvInfo = {
+  type: "env";
+  name: string;
+  status?: Connection_Status;
+};
+
+export type Connection_Info = Connection_CredentialInfo | Connection_EnvInfo;
+
+export type Connection_Status = {
+  status: "needs_auth";
+  message: string;
+  url?: string;
+};
+
+export type Credential_CreateInput = {
+  id?: Credential_ID;
+  integrationID: Integration_ID;
+  label?: string;
+  value: Credential_Value;
+  activate?: boolean;
+};
+
+export type Credential_Entry = {
+  id: Credential_ID;
+  integrationID: Integration_ID;
+  label: string;
+  active: boolean;
+  value: Credential_Value;
+};
+
+export type Credential_External = {
+  type: "external";
+  methodID: Integration_MethodID;
+  metadata?: Record<string, unknown>;
+};
+
+export type Credential_ID = string;
+
+export type Credential_Key = {
+  type: "key";
+  key: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type Credential_OAuth = {
   type: "oauth";
+  methodID: Integration_MethodID;
   refresh: string;
   access: string;
   expires: number;
-  accountId?: string;
-  enterpriseUrl?: string;
+  metadata?: Record<string, unknown>;
 };
 
-export type ApiAuth = {
-  type: "api";
-  key: string;
-  metadata?: Record<string, string>;
+export type Credential_Value = Credential_OAuth | Credential_Key | Credential_External;
+
+export type Event_ID = string;
+
+export type Event_Seq = number;
+
+export type Event_VersionEncoded_c3ea984aceae = 2;
+
+export type Event_VersionEncoded_c77c5abcb68d = 1;
+
+/** Marker emitted once when a log read reaches its captured watermark. The reader holds every event committed at or below seq. */
+export type EventLog_Synced = {
+  type: "log.synced";
+  aggregateID: string;
+  seq?: Event_Seq;
 };
 
-export type WellKnownAuth = {
-  type: "wellknown";
+export type FileDiff_Info = {
+  file: string;
+  patch: string;
+  additions: number;
+  deletions: number;
+  status: "added" | "deleted" | "modified";
+  more?: true;
+};
+
+export type FileNotFoundErrorEncoded = {
+  _tag: "FileNotFoundError";
+  path: string;
+  message: string;
+};
+
+export type FileSystem_Entry = {
+  path: RelativePath;
+  type: "file" | "directory";
+};
+
+export type FileSystem_Write = {
+  path: AbsolutePath;
+};
+
+export type ForbiddenErrorEncoded = {
+  _tag: "ForbiddenError";
+  message: string;
+};
+
+export type Form_Answer = Record<string, Form_Value>;
+
+export type Form_Answer_1 = Record<string, Form_Value_1>;
+
+export type Form_BooleanField = {
   key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When>;
+  type: "boolean";
+  default?: boolean;
+};
+
+export type Form_BooleanField_1 = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When_1>;
+  type: "boolean";
+  default?: boolean;
+};
+
+export type Form_CreatePayload = {
+  id?: Form_ID | null;
+  title: string;
+  metadata?: Form_Metadata;
+  fields: Form_Fields;
+};
+
+export type Form_Detail = {
+  id: Form_ID;
+  sessionID: string;
+  title: string;
+  metadata?: Form_Metadata;
+  fields: Form_Fields;
+  state: Form_State;
+};
+
+export type Form_ExternalField = {
+  key: string;
+  type: "external";
+  url: string;
+  title?: string;
+  description?: string;
+};
+
+export type Form_Field = Form_StringField | Form_NumberField | Form_IntegerField | Form_BooleanField | Form_MultiselectField | Form_ExternalField;
+
+export type Form_Field_1 = Form_StringField_1 | Form_NumberField_1 | Form_IntegerField_1 | Form_BooleanField_1 | Form_MultiselectField_1 | Form_ExternalField;
+
+export type Form_Fields = Array<Form_Field>;
+
+export type Form_Fields_1 = Array<Form_Field_1>;
+
+export type Form_ID = string;
+
+export type Form_Info = {
+  id: Form_ID;
+  sessionID: string;
+  title: string;
+  metadata?: Form_Metadata;
+  fields: Form_Fields;
+};
+
+export type Form_Info_1 = {
+  id: Form_ID;
+  sessionID: string;
+  title: string;
+  metadata?: Form_Metadata;
+  fields: Form_Fields_1;
+};
+
+export type Form_IntegerField = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When>;
+  type: "integer";
+  minimum?: number | ("Infinity" | "-Infinity" | "NaN");
+  maximum?: number | ("Infinity" | "-Infinity" | "NaN");
+  default?: number | ("Infinity" | "-Infinity" | "NaN");
+};
+
+export type Form_IntegerField_1 = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When_1>;
+  type: "integer";
+  minimum?: number | ("NaN" | "Infinity" | "-Infinity");
+  maximum?: number | ("NaN" | "Infinity" | "-Infinity");
+  default?: number | ("NaN" | "Infinity" | "-Infinity");
+};
+
+export type Form_Metadata = Record<string, unknown>;
+
+export type Form_MultiselectField = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When>;
+  type: "multiselect";
+  options: Array<Form_Option>;
+  minItems?: number;
+  maxItems?: number;
+  custom?: boolean;
+  default?: Array<string>;
+};
+
+export type Form_MultiselectField_1 = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When_1>;
+  type: "multiselect";
+  options: Array<Form_Option>;
+  minItems?: number;
+  maxItems?: number;
+  custom?: boolean;
+  default?: Array<string>;
+};
+
+export type Form_NumberField = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When>;
+  type: "number";
+  minimum?: number | ("Infinity" | "-Infinity" | "NaN");
+  maximum?: number | ("Infinity" | "-Infinity" | "NaN");
+  default?: number | ("Infinity" | "-Infinity" | "NaN");
+};
+
+export type Form_NumberField_1 = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When_1>;
+  type: "number";
+  minimum?: number | ("NaN" | "Infinity" | "-Infinity");
+  maximum?: number | ("NaN" | "Infinity" | "-Infinity");
+  default?: number | ("NaN" | "Infinity" | "-Infinity");
+};
+
+export type Form_Option = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+export type Form_Reply = {
+  answer: Form_Answer;
+};
+
+export type Form_State = {
+  status: "pending";
+} | {
+  status: "answered";
+  answer: Form_Answer;
+} | {
+  status: "cancelled";
+  message?: string;
+};
+
+export type Form_StringField = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When>;
+  type: "string";
+  format?: "email" | "uri" | "date" | "date-time";
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  placeholder?: string;
+  default?: string;
+  options?: Array<Form_Option>;
+  custom?: boolean;
+};
+
+export type Form_StringField_1 = {
+  key: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<Form_When_1>;
+  type: "string";
+  format?: "email" | "uri" | "date" | "date-time";
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  placeholder?: string;
+  default?: string;
+  options?: Array<Form_Option>;
+  custom?: boolean;
+};
+
+export type Form_Value = string | number | ("Infinity" | "-Infinity" | "NaN") | boolean | Array<string>;
+
+export type Form_Value_1 = string | number | ("NaN" | "Infinity" | "-Infinity") | boolean | Array<string>;
+
+export type Form_When = {
+  key: string;
+  op: "eq" | "neq";
+  value: string | number | ("Infinity" | "-Infinity" | "NaN") | boolean;
+};
+
+export type Form_When_1 = {
+  key: string;
+  op: "eq" | "neq";
+  value: string | number | ("NaN" | "Infinity" | "-Infinity") | boolean;
+};
+
+export type FormAlreadySettledErrorEncoded = {
+  _tag: "FormAlreadySettledError";
+  id: string;
+  message: string;
+};
+
+export type FormInvalidAnswerErrorEncoded = {
+  _tag: "FormInvalidAnswerError";
+  id: string;
+  message: string;
+};
+
+export type FormNotFoundErrorEncoded = {
+  _tag: "FormNotFoundError";
+  id: string;
+  message: string;
+};
+
+export type Generate_ChoiceAnswer = {
+  type: "choice";
+  name: string;
+  choice: Generate_ChoiceValue;
+  probabilities: Array<{
+    value: Generate_ChoiceValue;
+    probability: number;
+  }>;
+  confidence: number;
+};
+
+/** Pick one value from a fixed set */
+export type Generate_ChoiceQuestion = {
+  type: "choice";
+  /** Unique within the request; echoed on the matching answer */
+  name: string;
+  instructions: string;
+  choices: Array<{
+    value: Generate_ChoiceValue;
+    description?: string;
+  }>;
+};
+
+/** Choice values are typed: true and "true" are different values */
+export type Generate_ChoiceValue = string | boolean;
+
+export type Generate_DecisionAnswer = Generate_PredicateAnswer | Generate_ChoiceAnswer | Generate_ScoreAnswer | Generate_ErrorAnswer;
+
+export type Generate_DecisionFilePart = {
+  type: "file";
+  data: Prompt_Base64;
+  mime: string;
+  name?: string;
+};
+
+export type Generate_DecisionJsonPart = {
+  type: "json";
+  value: unknown;
+};
+
+export type Generate_DecisionPart = Generate_DecisionTextPart | Generate_DecisionJsonPart | Generate_DecisionFilePart;
+
+export type Generate_DecisionQuestion = Generate_PredicateQuestion | Generate_ChoiceQuestion | Generate_ScoreQuestion;
+
+export type Generate_DecisionRequest = {
+  model: Model_Ref;
+  /** The evidence every question is asked about, in order */
+  input: Array<Generate_DecisionPart>;
+  /** Question names must be unique; duplicates fail with InvalidRequestError */
+  questions: Array<Generate_DecisionQuestion>;
+};
+
+export type Generate_DecisionResult = {
+  /** One answer per question, in question order */
+  answers: Array<Generate_DecisionAnswer>;
+  cost?: Money_USD;
+  tokens?: Generate_Usage;
+  native?: Generate_Native;
+};
+
+export type Generate_DecisionTextPart = {
+  type: "text";
+  text: string;
+};
+
+/** This one question has no answer; the other answers still came back */
+export type Generate_ErrorAnswer = {
+  type: "error";
+  name: string;
+  /** Why the question has no answer, for example refusal */
+  reason: string;
+  message?: string;
+};
+
+export type Generate_File = {
+  data: Prompt_Base64;
+  mime: string;
+  name?: string;
+};
+
+/** Aspect ratio as width:height, for example 16:9 */
+export type Generate_ImageAspect = string;
+
+export type Generate_ImageOutput = {
+  type: "image";
+  data: Prompt_Base64;
+  mime: string;
+  name?: string;
+};
+
+export type Generate_ImageRequest = {
+  model: Model_Ref;
+  prompt: string;
+  images?: Array<Generate_File>;
+  n?: number;
+  aspect?: Generate_ImageAspect;
+  resolution?: Generate_ImageResolution;
+};
+
+/** Size tier such as 1K, 2K or 4K; 1K is about as many pixels as 1024x1024 at the requested aspect */
+export type Generate_ImageResolution = ("1K" | "2K" | "4K") | string;
+
+export type Generate_ImageResult = {
+  images: Array<Generate_ImageOutput>;
+  cost?: Money_USD;
+  tokens?: Generate_Usage;
+  native?: Generate_Native;
+};
+
+/** Provider-specific data the shared fields do not cover */
+export type Generate_Native = Record<string, unknown>;
+
+export type Generate_PredicateAnswer = {
+  type: "predicate";
+  name: string;
+  probability: number;
+};
+
+/** The probability that a statement is true */
+export type Generate_PredicateQuestion = {
+  type: "predicate";
+  /** Unique within the request; echoed on the matching answer */
+  name: string;
+  instructions: string;
+  criteria?: {
+    true?: string;
+    false?: string;
+  };
+};
+
+export type Generate_ScoreAnswer = {
+  type: "score";
+  name: string;
+  /** Probability-weighted level index, so it can fall between levels */
+  score: number;
+  probabilities: Array<{
+    value: number;
+    label: string;
+    probability: number;
+  }>;
+  confidence: number;
+};
+
+/** Place the input on ordered levels, lowest first */
+export type Generate_ScoreQuestion = {
+  type: "score";
+  /** Unique within the request; echoed on the matching answer */
+  name: string;
+  instructions: string;
+  levels: Array<{
+    label: string;
+    description?: string;
+  }>;
+};
+
+/** Token counts, when the provider reports them */
+export type Generate_Usage = {
+  input?: number;
+  output?: number;
+};
+
+export type GenerateDecisionsResponse = {
+  data: Generate_DecisionResult;
+};
+
+export type GenerateImageResponse = {
+  data: Generate_ImageResult;
+};
+
+export type GenerateTextResponse = {
+  data: {
+    text: string;
+  };
+};
+
+export type Instruction_Hash = string;
+
+export type Instruction_Key = string;
+
+export type InstructionEntry_Info = {
+  key: InstructionEntry_Key;
+  /** JSON value attached to the session's instructions */
+  value: unknown;
+};
+
+/** Instruction entry key (lowercase alphanumerics plus . _ -) */
+export type InstructionEntry_Key = string;
+
+export type InstructionEntry_Snapshot = Array<{
+  key: InstructionEntry_Key;
+  /** JSON value attached to the session's instructions */
+  value: unknown;
+  removed: boolean;
+}>;
+
+export type InstructionEntryValueTooLargeErrorEncoded = {
+  _tag: "InstructionEntryValueTooLargeError";
+  actualBytes: number;
+  maxBytes: number;
+  message: string;
+};
+
+export type Integration_AttemptEncoded = {
+  attemptID: Integration_AttemptID;
+  url: string;
+  instructions: string;
+  mode: "auto" | "code";
+  paste?: true;
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+};
+
+export type Integration_AttemptID = string;
+
+export type Integration_AttemptStatus = ({
+  status: "pending";
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+}) | ({
+  status: "complete";
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+}) | ({
+  status: "failed";
+  message: string;
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+}) | ({
+  status: "expired";
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+});
+
+export type Integration_CommandAttempt = {
+  attemptID: Integration_AttemptID;
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+};
+
+export type Integration_CommandAttemptStatus = ({
+  status: "pending";
+  message?: string;
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+}) | ({
+  status: "complete";
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+}) | ({
+  status: "failed";
+  message: string;
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+}) | ({
+  status: "expired";
+  time: {
+    created: number | ("Infinity" | "-Infinity" | "NaN");
+    expires: number | ("Infinity" | "-Infinity" | "NaN");
+  };
+});
+
+export type Integration_CommandMethod = {
+  id: Integration_MethodID;
+  type: "command";
+  label: string;
+  command: Array<string>;
+};
+
+export type Integration_EnvMethod = {
+  type: "env";
+  names: Array<string>;
+};
+
+export type Integration_ExternalMethod = {
+  id: Integration_MethodID;
+  type: "external";
+  label: string;
+  form?: Form_Fields;
+};
+
+export type Integration_ID = string;
+
+export type Integration_Info = {
+  id: Integration_ID;
+  name: string;
+  metadata?: Record<string, unknown>;
+  methods: Array<Integration_Method>;
+  connections: Array<Connection_Info>;
+};
+
+export type Integration_KeyMethod = {
+  type: "key";
+  label?: string;
+  form?: Form_Fields;
+};
+
+export type Integration_Method = Integration_OAuthMethod | Integration_CommandMethod | Integration_KeyMethod | Integration_ExternalMethod | Integration_EnvMethod;
+
+export type Integration_MethodID = string;
+
+export type Integration_OAuthMethod = {
+  id: Integration_MethodID;
+  type: "oauth";
+  label: string;
+  form?: Form_Fields;
+};
+
+export type IntegrationAttemptNotFoundErrorEncoded = {
+  _tag: "IntegrationAttemptNotFoundError";
+  integrationID: string;
+  attemptID: string;
+  message: string;
+};
+
+export type IntegrationMethodNotFoundErrorEncoded = {
+  _tag: "IntegrationMethodNotFoundError";
+  integrationID: string;
+  methodID: string;
+  message: string;
+};
+
+export type IntegrationNotFoundErrorEncoded = {
+  _tag: "IntegrationNotFoundError";
+  integrationID: string;
+  message: string;
+};
+
+export type InvalidCursorErrorEncoded = {
+  _tag: "InvalidCursorError";
+  message: string;
+};
+
+export type InvalidRequestErrorEncoded = {
+  _tag: "InvalidRequestError";
+  message: string;
+  kind?: string | null;
+  field?: string | null;
+};
+
+export type Job_Image = {
+  kind: "image";
+  id: string;
+  sessionID: Session_ID;
+  status: Job_Status;
+  title?: string;
+  time: Job_Time;
+  path: string;
+  model: string;
+};
+
+export type Job_Info = Job_Shell | Job_Subagent | Job_Image;
+
+export type Job_Kind = "shell" | "subagent" | "image";
+
+export type Job_Shell = {
+  kind: "shell";
+  id: string;
+  sessionID: Session_ID;
+  status: Job_Status;
+  title?: string;
+  time: Job_Time;
+  shellID: string;
+  command: string;
+};
+
+export type Job_Status = "running" | "completed" | "error" | "cancelled";
+
+export type Job_Subagent = {
+  kind: "subagent";
+  id: string;
+  sessionID: Session_ID;
+  status: Job_Status;
+  title?: string;
+  time: Job_Time;
+  childSessionID: Session_ID;
+  agent: string;
+  description: string;
+};
+
+export type Job_Time = {
+  /** Start time in milliseconds since the Unix epoch */
+  started: number;
+  completed?: number;
+};
+
+export type Location_PublicInfo = {
+  directory: AbsolutePath;
+  project: {
+    id: Project_ID;
+    directory: AbsolutePath;
+    canonical: AbsolutePath;
+  };
+};
+
+export type Location_PublicRef = {
+  directory: AbsolutePath;
+};
+
+export type Location_Ref = {
+  directory: AbsolutePath;
+  workspaceID?: Workspace_ID;
+};
+
+export type LocationNotFoundErrorEncoded = {
+  _tag: "LocationNotFoundError";
+  location: Location_PublicRef;
+  message: string;
+};
+
+export type Mcp_LocalConfigEncoded = {
+  type: "local";
+  command: Array<string>;
+  cwd?: string;
+  environment?: Record<string, string>;
+  disabled?: boolean;
+  codemode?: boolean;
+  timeout?: {
+    startup?: number;
+    catalog?: number;
+    execution?: number;
+  };
+  protocol?: Mcp_Protocol;
+  pool?: boolean;
+};
+
+export type Mcp_OAuthConfigEncoded = {
+  client_id?: string;
+  client_secret?: string;
+  scope?: string;
+  callback_port?: number;
+  redirect_uri?: string;
+  auth_server_metadata_url?: string;
+};
+
+/** MCP protocol negotiation. "legacy" (default) opens with the initialize handshake and speaks protocol revisions up to 2025-11-25. "auto" probes for the 2026-07-28 revision and falls back to legacy when the server does not support it. "2026-07-28" requires that revision and fails otherwise. */
+export type Mcp_Protocol = "legacy" | "auto" | "2026-07-28";
+
+export type Mcp_RemoteConfigEncoded = {
+  type: "remote";
+  url: string;
+  headers?: Record<string, string>;
+  oauth?: Mcp_OAuthConfigEncoded | false;
+  disabled?: boolean;
+  codemode?: boolean;
+  timeout?: {
+    startup?: number;
+    catalog?: number;
+    execution?: number;
+  };
+  protocol?: Mcp_Protocol;
+  pool?: boolean;
+};
+
+export type Mcp_Resource = {
+  server: string;
+  name: string;
+  uri: string;
+  description?: string;
+  mimeType?: string;
+};
+
+export type Mcp_ResourceCatalog = {
+  resources: Array<Mcp_Resource>;
+  templates: Array<Mcp_ResourceTemplate>;
+};
+
+export type Mcp_ResourceTemplate = {
+  server: string;
+  name: string;
+  uriTemplate: string;
+  description?: string;
+  mimeType?: string;
+};
+
+export type Mcp_Server = {
+  name: string;
+  status: Mcp_Status_Connected | Mcp_Status_Pending | Mcp_Status_Disabled | Mcp_Status_Failed | Mcp_Status_NeedsAuth;
+  title?: string;
+  integrationID?: Integration_ID;
+};
+
+export type Mcp_Status_Connected = {
+  status: "connected";
+};
+
+export type Mcp_Status_Disabled = {
+  status: "disabled";
+};
+
+export type Mcp_Status_Failed = {
+  status: "failed";
+  error: string;
+};
+
+export type Mcp_Status_NeedsAuth = {
+  status: "needs_auth";
+  error: string;
+};
+
+export type Mcp_Status_Pending = {
+  status: "pending";
+};
+
+export type McpServerNotFoundErrorEncoded = {
+  _tag: "McpServerNotFoundError";
+  server: string;
+  message: string;
+};
+
+export type MediaHash = string;
+
+export type MessageNotFoundErrorEncoded = {
+  _tag: "MessageNotFoundError";
+  sessionID: string;
+  messageID: string;
+  message: string;
+};
+
+export type Model_CacheFormat = "anthropic" | "alibaba";
+
+export type Model_Capabilities = {
+  tools: boolean;
+  input: Array<string>;
+  output: Array<string>;
+  temperature?: boolean;
+};
+
+export type Model_Compatibility = {
+  reasoningField?: Model_ReasoningField;
+  requireReasoning?: boolean;
+  maxTokensField?: Model_MaxTokensField;
+  requireFinishReason?: boolean;
+  requireAssistantAfterTool?: boolean;
+  supportsPromptCacheKey?: boolean;
+  streamUsage?: boolean;
+  cacheFormat?: Model_CacheFormat;
+  supportsThinkingBlockBinding?: boolean;
+  supportsEffortUpdates?: boolean;
+  mediaInput?: Model_MediaInput;
+};
+
+export type Model_Cost = {
+  tier?: {
+    type: "context";
+    size: number;
+  };
+  input: Money_USDPerMillionTokens;
+  output: Money_USDPerMillionTokens;
+  cache: {
+    read: Money_USDPerMillionTokens;
+    write: Money_USDPerMillionTokens;
+  };
+};
+
+export type Model_Info = {
+  id: string;
+  modelID: string;
+  providerID: Provider_ID;
+  canonical?: Provider_ID;
+  type?: Model_Type;
+  family?: string;
+  name: string;
+  compatibility?: Model_Compatibility;
+  package?: string;
+  settings?: Model_Settings;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+  capabilities: Model_Capabilities;
+  variants: Array<Model_Variant>;
+  time: {
+    released: number;
+  };
+  cost: Array<Model_Cost>;
+  status: "alpha" | "beta" | "deprecated" | "active";
+  enabled: boolean;
+  limit: {
+    context: number;
+    input?: number;
+    output: number;
+  };
+};
+
+export type Model_MaxTokensField = "max_completion_tokens" | "max_tokens";
+
+export type Model_MediaInput = "assets" | "state" | "root";
+
+export type Model_ReasoningField = ("reasoning" | "reasoning_content" | "reasoning_text") | string;
+
+export type Model_Ref = {
+  id: string;
+  providerID: Provider_ID;
+  variant?: string;
+};
+
+export type Model_Settings = {
+  compaction?: Provider_Compaction;
+  cache?: Provider_Cache;
+  encoding?: Provider_Encoding;
+} & Record<string, unknown>;
+
+export type Model_Type = ("chat" | "decision" | "image") | string;
+
+export type Model_Variant = {
+  id: string;
+  settings?: Model_VariantSettings;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+};
+
+export type Model_VariantSettings = {
+  compaction?: Provider_Compaction;
+  encoding?: Provider_Encoding;
+} & Record<string, unknown>;
+
+export type ModelNotFoundErrorEncoded = {
+  _tag: "ModelNotFoundError";
+  providerID: string;
+  modelID: string;
+  message: string;
+};
+
+export type Money_USD = number;
+
+export type Money_USDPerMillionTokens = number;
+
+export type PairingCode = {
+  code: string;
+  expires_in: number;
+};
+
+export type PairingSession = {
   token: string;
 };
 
-export type Auth = OAuth | ApiAuth | WellKnownAuth;
+export type Permission_Effect = "allow" | "deny" | "ask";
 
-export type effect_HttpApiError_BadRequest = {
-  _tag: "BadRequest";
-};
+export type Permission_ID = string;
 
-export type InvalidRequestError = {
-  _tag: "InvalidRequestError";
-  message: string;
-  kind?: string;
-  field?: string;
-};
+export type Permission_Reply = "once" | "always" | "reject";
 
-export type MoveSessionError = {
-  name: "MoveSessionError";
-  data: {
-    message: string;
-  };
-};
-
-export type SnapshotFileDiff = {
-  file?: string;
-  patch?: string;
-  additions: number;
-  deletions: number;
-  status?: "added" | "deleted" | "modified";
-};
-
-export type PermissionAction = "allow" | "deny" | "ask";
-
-export type PermissionRule = {
-  permission: string;
-  pattern: string;
-  action: PermissionAction;
-};
-
-export type PermissionRuleset = Array<PermissionRule>;
-
-export type Session = {
-  id: string;
-  slug: string;
-  projectID: string;
-  workspaceID?: string;
-  directory: string;
-  path?: string;
-  parentID?: string;
-  summary?: {
-    additions: number;
-    deletions: number;
-    files: number;
-    diffs?: Array<SnapshotFileDiff>;
-  };
-  cost?: number;
-  tokens?: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: {
-      read: number;
-      write: number;
-    };
-  };
-  share?: {
-    url: string;
-  };
-  title: string;
-  agent?: string;
-  model?: {
-    id: string;
-    providerID: string;
-    variant?: string;
-  };
-  version: string;
+export type Permission_Request = {
+  id: Permission_ID;
+  sessionID: Session_ID;
+  action: string;
+  resources: Array<string>;
+  save?: Array<string>;
   metadata?: Record<string, unknown>;
+  source?: Permission_Source;
+  message?: string;
+};
+
+export type Permission_Rule = {
+  action: string;
+  resource: string;
+  effect: Permission_Effect;
+};
+
+export type Permission_Ruleset = Array<Permission_Rule>;
+
+export type Permission_Source = {
+  type: "tool";
+  messageID: string;
+  id: string;
+};
+
+export type PermissionNotFoundErrorEncoded = {
+  _tag: "PermissionNotFoundError";
+  requestID: string;
+  message: string;
+};
+
+export type PermissionSaved_ID = string;
+
+export type PermissionSaved_Info = {
+  id: PermissionSaved_ID;
+  projectID: Project_ID;
+  action: string;
+  resource: string;
   time: {
     created: number;
     updated: number;
-    compacting?: number;
-    archived?: number;
-  };
-  permission?: PermissionRuleset;
-  revert?: {
-    messageID: string;
-    partID?: string;
-    snapshot?: string;
-    diff?: string;
   };
 };
 
-export type OutputFormatText = {
-  type: "text";
-};
-
-export type JSONSchema = Record<string, unknown>;
-
-export type OutputFormatJsonSchema = {
-  type: "json_schema";
-  schema: JSONSchema;
-  retryCount?: number;
-};
-
-export type OutputFormat = OutputFormatText | OutputFormatJsonSchema;
-
-export type UserMessage = {
+export type PermissionSavedNotFoundErrorEncoded = {
+  _tag: "PermissionSavedNotFoundError";
   id: string;
-  sessionID: string;
-  role: "user";
-  time: {
-    created: number;
-  };
-  format?: OutputFormat;
-  summary?: {
-    title?: string;
-    body?: string;
-    diffs: Array<SnapshotFileDiff>;
-  };
-  agent: string;
-  model: {
-    providerID: string;
-    modelID: string;
-    variant?: string;
-  };
-  system?: string;
-  tools?: Record<string, boolean>;
+  message: string;
 };
 
-export type ProviderAuthError = {
-  name: "ProviderAuthError";
-  data: {
-    providerID: string;
-    message: string;
+export type PersistentPty_CreateInput = {
+  command?: string;
+  args: Array<string>;
+  cwd?: string;
+  title: string;
+  env: Record<string, string>;
+  size?: {
+    cols: number;
+    rows: number;
   };
 };
 
-export type UnknownError = {
-  name: "UnknownError";
-  data: {
-    message: string;
-    ref?: string;
+export type PersistentPty_Handoff = {
+  directory: string;
+  instanceID: string;
+  ticket: string;
+  expiresAt: number | ("Infinity" | "-Infinity" | "NaN");
+};
+
+export type PersistentPty_Info = {
+  id: Pty_ID;
+  title: string;
+  command: string;
+  args: Array<string>;
+  cwd: string;
+  status: "running" | "exited";
+  pid: number;
+  exitCode?: number;
+  sessionID: Session_ID;
+  userTitle: string | null;
+  foregroundProcess: string | null;
+  size: {
+    cols: number;
+    rows: number;
+  };
+  output: {
+    head: number;
+    tail: number;
   };
 };
 
-export type MessageOutputLengthError = {
-  name: "MessageOutputLengthError";
-  data: Record<string, unknown>;
-};
-
-export type MessageAbortedError = {
-  name: "MessageAbortedError";
-  data: {
-    message: string;
-  };
-};
-
-export type StructuredOutputError = {
-  name: "StructuredOutputError";
-  data: {
-    message: string;
-    retries: number;
-  };
-};
-
-export type ContextOverflowError = {
-  name: "ContextOverflowError";
-  data: {
-    message: string;
-    responseBody?: string;
-  };
-};
-
-export type ContentFilterError = {
-  name: "ContentFilterError";
-  data: {
-    message: string;
-  };
-};
-
-export type APIError = {
-  name: "APIError";
-  data: {
-    message: string;
-    statusCode?: number;
-    isRetryable: boolean;
-    responseHeaders?: Record<string, string>;
-    responseBody?: string;
-    metadata?: Record<string, string>;
-  };
-};
-
-export type AssistantMessage = {
-  id: string;
-  sessionID: string;
-  role: "assistant";
-  time: {
-    created: number;
-    completed?: number;
-  };
-  error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | StructuredOutputError | ContextOverflowError | ContentFilterError | APIError;
-  parentID: string;
-  modelID: string;
-  providerID: string;
-  mode: string;
-  agent: string;
-  path: {
-    cwd: string;
-    root: string;
-  };
-  summary?: boolean;
-  cost: number;
-  tokens: {
-    total?: number;
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: {
-      read: number;
-      write: number;
+export type PersistentPty_ReadResult = {
+  ptyID: Pty_ID;
+  title: string;
+  cwd: string;
+  foregroundProcess: string | null;
+  screen: {
+    text: string;
+    cols: number;
+    rows: number;
+    cursor: {
+      x: number;
+      y: number;
     };
   };
-  structured?: unknown;
-  variant?: string;
-  finish?: string;
 };
 
-export type Message = UserMessage | AssistantMessage;
-
-export type TextPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "text";
+export type PersistentPty_Snapshot = {
+  info: PersistentPty_Info;
   text: string;
-  synthetic?: boolean;
-  ignored?: boolean;
-  time?: {
-    start: number;
-    end?: number;
-  };
-  metadata?: Record<string, unknown>;
-};
-
-export type SubtaskPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "subtask";
-  prompt: string;
-  description: string;
-  agent: string;
-  model?: {
-    providerID: string;
-    modelID: string;
-  };
-  command?: string;
-};
-
-export type ReasoningPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "reasoning";
-  text: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    start: number;
-    end?: number;
+  checkpoint: string;
+  cursor: {
+    x: number;
+    y: number;
   };
 };
 
-export type FilePartSourceText = {
-  value: string;
-  start: number;
-  end: number;
+export type PersistentPty_UpdateInput = {
+  attachmentID?: string;
+  size?: {
+    cols: number;
+    rows: number;
+  };
+  title?: string | null;
 };
 
-export type FileSource = {
-  text: FilePartSourceText;
-  type: "file";
+export type Plugin_Features = {
+  server?: true;
+  tui?: true;
+  rpc?: true;
+  gui?: true;
+};
+
+export type Plugin_GuiBundle = {
+  code: string;
+  revision: string;
+  options: Record<string, unknown>;
+};
+
+export type Plugin_ID = string;
+
+export type Plugin_Info = {
+  id?: Plugin_ID;
+  source: Plugin_Source;
+  features: Plugin_Features;
+  state: Plugin_State;
+};
+
+export type Plugin_Source = {
+  type: "builtin";
+} | {
+  type: "package";
+  target: string;
+  version?: string;
+  outdated?: true;
+  updating?: true;
+} | {
+  type: "local";
   path: string;
+} | {
+  type: "sdk";
 };
 
-export type Range = {
-  start: {
-    line: number;
-    character: number;
-  };
-  end: {
-    line: number;
-    character: number;
-  };
+export type Plugin_State = {
+  status: "active";
+} | {
+  status: "failed";
+  error: string;
+  ref?: string;
 };
 
-export type SymbolSource = {
-  text: FilePartSourceText;
-  type: "symbol";
-  path: string;
-  range: Range;
+export type PluginNotFoundErrorEncoded = {
+  _tag: "PluginNotFoundError";
+  pluginID: string;
+  message: string;
+};
+
+export type Project = {
+  id: Project_ID;
+  canonical: AbsolutePath;
+  vcs?: Project_Vcs;
+  name?: string;
+  icon?: Project_Icon;
+  commands?: Project_Commands;
+  time: Project_Time;
+  sandboxes: Array<string>;
+};
+
+export type Project_Commands = {
+  /** Startup script to run when creating a new workspace (worktree) */
+  start?: string;
+};
+
+export type Project_ID = string;
+
+export type Project_Icon = {
+  url?: string;
+  override?: string;
+  color?: string;
+};
+
+export type Project_Time = {
+  created: number;
+  updated: number;
+  active: number;
+  archived?: number;
+};
+
+export type Project_Vcs = string;
+
+export type ProjectNotFoundErrorEncoded = {
+  _tag: "ProjectNotFoundError";
+  projectID: string;
+  message: string;
+};
+
+export type Prompt_AgentAttachment = {
   name: string;
-  kind: number;
+  mention?: Prompt_Mention;
 };
 
-export type ResourceSource = {
-  text: FilePartSourceText;
-  type: "resource";
-  clientName: string;
+export type Prompt_Base64 = string;
+
+export type Prompt_FileAttachment = {
+  data: Prompt_Base64;
+  mime: string;
+  source: Prompt_FileSource;
+  name?: string;
+  description?: string;
+  mention?: Prompt_Mention;
+};
+
+export type Prompt_FileSource = {
+  type: "inline";
+} | {
+  type: "uri";
   uri: string;
 };
 
-export type FilePartSource = FileSource | SymbolSource | ResourceSource;
-
-export type FilePart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "file";
-  mime: string;
-  filename?: string;
-  url: string;
-  source?: FilePartSource;
-};
-
-export type ToolStatePending = {
-  status: "pending";
-  input: Record<string, unknown>;
-  raw: string;
-};
-
-export type ToolStateRunning = {
-  status: "running";
-  input: Record<string, unknown>;
-  title?: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    start: number;
-  };
-};
-
-export type ToolStateCompleted = {
-  status: "completed";
-  input: Record<string, unknown>;
-  output: string;
-  title: string;
-  metadata: Record<string, unknown>;
-  time: {
-    start: number;
-    end: number;
-    compacted?: number;
-  };
-  attachments?: Array<FilePart>;
-};
-
-export type ToolStateError = {
-  status: "error";
-  input: Record<string, unknown>;
-  error: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    start: number;
-    end: number;
-  };
-};
-
-export type ToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted | ToolStateError;
-
-export type ToolPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "tool";
-  callID: string;
-  tool: string;
-  state: ToolState;
-  metadata?: Record<string, unknown>;
-};
-
-export type StepStartPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "step-start";
-  snapshot?: string;
-};
-
-export type StepFinishPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "step-finish";
-  reason: string;
-  snapshot?: string;
-  cost: number;
-  tokens: {
-    total?: number;
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: {
-      read: number;
-      write: number;
-    };
-  };
-};
-
-export type SnapshotPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "snapshot";
-  snapshot: string;
-};
-
-export type PatchPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "patch";
-  hash: string;
-  files: Array<string>;
-};
-
-export type AgentPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "agent";
-  name: string;
-  source?: {
-    value: string;
-    start: number;
-    end: number;
-  };
-};
-
-export type RetryPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "retry";
-  attempt: number;
-  error: APIError;
-  time: {
-    created: number;
-  };
-};
-
-export type CompactionPart = {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "compaction";
-  auto: boolean;
-  overflow?: boolean;
-  tail_start_id?: string;
-};
-
-export type Part = TextPart | SubtaskPart | ReasoningPart | FilePart | ToolPart | StepStartPart | StepFinishPart | SnapshotPart | PatchPart | AgentPart | RetryPart | CompactionPart;
-
-export type Prompt = {
+export type Prompt_Mention = {
+  start: number;
+  end: number;
   text: string;
-  files?: Array<PromptFileAttachment>;
-  agents?: Array<PromptAgentAttachment>;
+};
+
+export type Prompt_SkillAttachment = {
+  id: Skill_ID;
+  name: Skill_Name;
+  text?: string;
+  mention?: Prompt_Mention;
+};
+
+export type PromptInput_FileAttachment = {
+  uri: string;
+  source?: Prompt_FileSource;
+  name?: string;
+  description?: string;
+  mention?: Prompt_Mention;
+};
+
+export type PromptInput_SkillAttachment = {
+  id: Skill_ID;
+  mention?: Prompt_Mention;
+};
+
+export type Provider_Cache = {
+  ttl?: Provider_CacheTTL;
+  warming?: Provider_CacheWarming;
+};
+
+export type Provider_CacheTTL = string;
+
+export type Provider_CacheWarming = boolean | ({
+  interval?: "auto" | string;
+  duration?: string;
+});
+
+export type Provider_Compaction = {
+  type: "summary";
+} | {
+  type: "native";
+};
+
+export type Provider_Compatibility = {
+  reasoningField?: Model_ReasoningField;
+  requireReasoning?: boolean;
+  maxTokensField?: Model_MaxTokensField;
+  requireFinishReason?: boolean;
+  requireAssistantAfterTool?: boolean;
+  supportsPromptCacheKey?: boolean;
+  streamUsage?: boolean;
+  cacheFormat?: Model_CacheFormat;
+  mediaInput?: Model_MediaInput;
+};
+
+export type Provider_Encoding = "zstd" | "gzip" | "none";
+
+export type Provider_ID = string;
+
+export type Provider_Info = {
+  id: Provider_ID;
+  canonical?: Provider_ID;
+  integrationID?: Integration_ID;
+  name: string;
+  activation: "auto" | "enabled" | "disabled";
+  package: string;
+  compatibility?: Provider_Compatibility;
+  settings?: Provider_Settings;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+};
+
+export type Provider_Request = {
+  settings: Provider_Settings;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+};
+
+export type Provider_Settings = {
+  timeout?: number | false;
+  headerTimeout?: number | false;
+  chunkTimeout?: number | false;
+  compaction?: Provider_Compaction;
+  cache?: Provider_Cache;
+  transport?: Provider_Transport;
+  encoding?: Provider_Encoding;
+} & Record<string, unknown>;
+
+export type Provider_Transport = "http" | "websocket";
+
+export type ProviderNotFoundErrorEncoded = {
+  _tag: "ProviderNotFoundError";
+  providerID: string;
+  message: string;
+};
+
+export type ProviderRequestErrorEncoded = {
+  _tag: "ProviderRequestError";
+  providerID: string;
+  reason: "authentication" | "rate_limit" | "content_filter" | "invalid_request" | "overloaded" | "provider";
+  message: string;
+  status?: number | null;
+  retryAfterMs?: number | null;
 };
 
 export type Pty = {
-  id: string;
+  id: Pty_ID;
   title: string;
   command: string;
   args: Array<string>;
@@ -518,13 +1779,741 @@ export type Pty = {
   exitCode?: number;
 };
 
-export type Todo = {
-  /** Brief description of the task */
-  content: string;
-  /** Current status of the task: pending, in_progress, completed, cancelled */
-  status: string;
-  /** Priority level of the task: high, medium, low */
-  priority: string;
+export type Pty_ID = string;
+
+export type PtyFeatureUnsupportedErrorEncoded = {
+  _tag: "PtyFeatureUnsupportedError";
+  feature: string;
+  message: string;
+};
+
+export type PtyNotFoundErrorEncoded = {
+  _tag: "PtyNotFoundError";
+  ptyID: string;
+  message: string;
+};
+
+export type PtyTicket_ConnectToken = {
+  ticket: string;
+  expires_in: number;
+};
+
+export type Reference_GitSource = {
+  type: "git";
+  repository: string;
+  branch?: string;
+};
+
+export type Reference_Info = {
+  name: string;
+  path: AbsolutePath;
+  description?: string;
+  hidden?: boolean;
+  source: Reference_Source;
+};
+
+export type Reference_LocalSource = {
+  type: "local";
+  path: AbsolutePath;
+};
+
+export type Reference_Source = Reference_LocalSource | Reference_GitSource;
+
+export type RelativePath = string;
+
+export type Rpc_Input = {
+  input?: unknown;
+};
+
+export type Rpc_Output = {
+  output?: unknown;
+};
+
+export type RpcErrorEncoded = {
+  _tag: "RpcError";
+  type: string;
+  message: string;
+  data?: unknown | null;
+};
+
+export type RpcInternalErrorEncoded = {
+  _tag: "RpcInternalError";
+  type: "rpc.internal" | "rpc.invalid_output";
+  message: string;
+  data?: unknown | null;
+};
+
+export type Schedule_Action = Schedule_Action_Prompt;
+
+export type Schedule_Action_Prompt = {
+  type: "prompt";
+  prompt: string;
+};
+
+export type Schedule_Condition = Schedule_Condition_Shell | Schedule_Condition_Code;
+
+export type Schedule_Condition_Code = {
+  type: "code";
+  code: string;
+};
+
+export type Schedule_Condition_Shell = {
+  type: "shell";
+  run: string;
+  is?: string;
+  matches?: string;
+  changes?: boolean;
+};
+
+export type Schedule_ConditionInput = {
+  /** Shell command to run in the Session's directory. Alone, exit 0 wakes and stdout is appended. */
+  run: string;
+  is?: string;
+  matches?: string;
+  changes?: boolean;
+  code?: unknown;
+} | ({
+  /** Code Mode JavaScript check (no fetch; 30s, 20 tool calls, 32 KB output cap). Call tools statically as tools.<ns>.<tool>(...) or tools["ns-name"].tool(...); each is authorized once at creation to run unattended. Runs once at creation with state = null (if baselines state without waking; until matches immediately if true), with globals state, now (epoch ms) and runs. Return a boolean or { wake, state?, message? } (message is appended to prompt on wake), e.g.: const t = await tools.slack.read_thread({ id }); return { wake: state !== null && t.count > state.count, state: { count: t.count }, message: "New reply" } */
+  code: string;
+  run?: unknown;
+  is?: unknown;
+  matches?: unknown;
+  changes?: unknown;
+});
+
+export type Schedule_CreatePayload = {
+  sessionID: Session_ID;
+  name?: string;
+  when?: Schedule_WhenInput;
+  if?: Schedule_ConditionInput;
+  until?: Schedule_ConditionInput;
+  ends?: Schedule_Ends;
+  /** The message the Session receives when the schedule wakes. */
+  prompt: string;
+};
+
+/** A duration such as "90 seconds", "5 minutes" or "2 hours". */
+export type Schedule_Duration = string;
+
+export type Schedule_Ends = {
+  after?: Schedule_Duration;
+  at?: string;
+  times?: number;
+};
+
+export type Schedule_ID = string;
+
+export type Schedule_Info = {
+  id: Schedule_ID;
+  sessionID?: Session_ID;
+  name?: string;
+  when: Schedule_When;
+  tz: string;
+  if?: Schedule_Condition;
+  until?: Schedule_Condition;
+  action: Schedule_Action;
+  status: Schedule_Status;
+  nextDueAt?: number;
+  endsAt?: number;
+  remainingRuns?: number;
+  runCount: number;
+  lastFiredAt?: number;
+  lastOutcome?: Schedule_Outcome;
+  lastOutput?: string;
+  time: {
+    created: number;
+    updated: number;
+  };
+};
+
+export type Schedule_Outcome = "fired" | "late" | "checked" | "expired" | "skipped" | "disabled" | "failed";
+
+export type Schedule_Status = "active" | "paused" | "done";
+
+export type Schedule_When = Schedule_When_In | Schedule_When_At | Schedule_When_Every | Schedule_When_Cron;
+
+export type Schedule_When_At = {
+  type: "at";
+  at: string;
+  tz?: string;
+};
+
+export type Schedule_When_Cron = {
+  type: "cron";
+  cron: string;
+  tz?: string;
+};
+
+export type Schedule_When_Every = {
+  type: "every";
+  every: Schedule_Duration;
+  tz?: string;
+};
+
+export type Schedule_When_In = {
+  type: "in";
+  in: Schedule_Duration;
+  tz?: string;
+};
+
+export type Schedule_WhenInput = {
+  in: Schedule_Duration;
+  at?: unknown;
+  every?: unknown;
+  cron?: unknown;
+  tz?: string;
+} | {
+  at: string;
+  in?: unknown;
+  every?: unknown;
+  cron?: unknown;
+  tz?: string;
+} | {
+  every: Schedule_Duration;
+  in?: unknown;
+  at?: unknown;
+  cron?: unknown;
+  tz?: string;
+} | {
+  cron: string;
+  in?: unknown;
+  at?: unknown;
+  every?: unknown;
+  tz?: string;
+};
+
+export type ScheduleNotFoundErrorEncoded = {
+  _tag: "ScheduleNotFoundError";
+  scheduleID: string;
+  message: string;
+};
+
+export type ServerInfo = {
+  version: string;
+  pid: number;
+  hostname?: string | null;
+  urls: Array<string>;
+  paths: {
+    tmp: string;
+  };
+  capabilities?: ({
+    persistentPty?: boolean | null;
+  }) | null;
+};
+
+export type ServiceUnavailableErrorEncoded = {
+  _tag: "ServiceUnavailableError";
+  message: string;
+  service?: string | null;
+};
+
+export type Session_Event_Durable = session_created | session_agent_selected | session_model_selected | session_moved | session_renamed | session_metadata_updated | session_permissions | session_viewed | session_archived | session_unarchived | session_deleted | session_forked | session_inbox_delivered | session_inbox_enqueued | session_inbox_cancelled | session_inbox_delivery_changed | session_execution_started | session_execution_succeeded | session_execution_failed | session_execution_interrupted | session_instructions_updated | session_synthetic | session_skill_activated | session_shell_started | session_shell_ended | session_step_started | session_step_streamed | session_step_ended | session_step_failed | session_text_started | session_text_ended | session_reasoning_started | session_reasoning_ended | session_tool_input_started | session_tool_input_ended | session_tool_called | session_tool_success | session_tool_failed | session_retry_scheduled | session_compaction_started | session_compaction_ended | session_compaction_failed | session_revert_staged | session_revert_cleared | session_revert_committed | session_usage_recorded | session_message_content_updated;
+
+export type Session_ForkBoundary = {
+  type: "before";
+  messageID: Session_Message_ID;
+} | {
+  type: "through";
+  messageID: Session_Message_ID;
+};
+
+export type Session_ID = string;
+
+export type Session_Inbox_Compaction = {
+  id: Session_Message_ID;
+  sessionID: Session_ID;
+  time: {
+    created: number;
+  };
+  type: "compaction";
+  payload: Session_Inbox_CompactionPayload;
+  delivery: Session_Inbox_Delivery;
+};
+
+export type Session_Inbox_CompactionPayload = unknown;
+
+export type Session_Inbox_Delivery = "steer" | "queue";
+
+export type Session_Inbox_Info = Session_Inbox_User | Session_Inbox_Synthetic | Session_Inbox_Compaction | Session_Inbox_Move;
+
+export type Session_Inbox_Item = {
+  type: "user";
+  payload: Session_Inbox_UserPayload;
+  delivery: Session_Inbox_Delivery;
+} | {
+  type: "synthetic";
+  payload: Session_Inbox_SyntheticPayload;
+  delivery: Session_Inbox_Delivery;
+} | {
+  type: "compaction";
+  payload: Session_Inbox_CompactionPayload;
+  delivery: Session_Inbox_Delivery;
+} | {
+  type: "move";
+  payload: Session_Inbox_MovePayload_1;
+  delivery: Session_Inbox_Delivery;
+};
+
+export type Session_Inbox_Move = {
+  id: Session_Message_ID;
+  sessionID: Session_ID;
+  time: {
+    created: number;
+  };
+  type: "move";
+  delivery: Session_Inbox_Delivery;
+  payload: Session_Inbox_MovePayload;
+};
+
+export type Session_Inbox_MovePayload = {
+  projectID: Project_ID;
+  subpath?: RelativePath;
+  location: Location_PublicRef;
+};
+
+export type Session_Inbox_MovePayload_1 = {
+  location: Location_Ref;
+  projectID: Project_ID;
+  subpath?: RelativePath;
+};
+
+export type Session_Inbox_Synthetic = {
+  id: Session_Message_ID;
+  sessionID: Session_ID;
+  time: {
+    created: number;
+  };
+  type: "synthetic";
+  payload: Session_Inbox_SyntheticPayload;
+  delivery: Session_Inbox_Delivery;
+};
+
+export type Session_Inbox_SyntheticPayload = {
+  text: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type Session_Inbox_User = {
+  id: Session_Message_ID;
+  sessionID: Session_ID;
+  time: {
+    created: number;
+  };
+  type: "user";
+  payload: Session_Inbox_UserPayload;
+  delivery: Session_Inbox_Delivery;
+};
+
+export type Session_Inbox_UserPayload = {
+  text: string;
+  files?: Array<Prompt_FileAttachment>;
+  agents?: Array<Prompt_AgentAttachment>;
+  skills?: Array<Prompt_SkillAttachment>;
+  metadata?: Record<string, unknown>;
+};
+
+export type Session_Info = {
+  id: Session_ID;
+  parentID?: Session_ID;
+  fork?: {
+    sessionID: Session_ID;
+    boundary: Session_ForkBoundary;
+  };
+  projectID: Project_ID;
+  agent?: Agent_ID;
+  model?: Model_Ref;
+  cost: Money_USD;
+  tokens: TokenUsage_Info;
+  outcome?: "succeeded" | "failed" | "interrupted";
+  time: {
+    created: number;
+    updated: number;
+    busy?: number;
+    idle?: number;
+    viewed?: number;
+    archived?: number;
+  };
+  title?: string;
+  subpath?: RelativePath;
+  metadata?: Session_Metadata;
+  permissions?: Permission_Ruleset;
+  revert?: Session_Revert;
+  location: Location_PublicRef;
+};
+
+export type Session_Message_AgentSelected = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  type: "agent-switched";
+  agent: Agent_ID;
+  previous?: Agent_ID;
+};
+
+export type Session_Message_Assistant = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+    streamed?: number;
+    completed?: number;
+  };
+  type: "assistant";
+  agent: Agent_ID;
+  model: Model_Ref;
+  content: Array<Session_Message_Assistant_Text | Session_Message_Assistant_Reasoning | Session_Message_Assistant_Tool>;
+  snapshot?: {
+    start?: Snapshot_ID;
+    end?: Snapshot_ID;
+    files?: Array<RelativePath>;
+  };
+  finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown";
+  rawFinish?: string;
+  native?: Session_Message_Native;
+  cost?: Money_USD;
+  tokens?: TokenUsage_Info;
+  error?: Session_StructuredError;
+  retry?: Session_Message_Assistant_Retry;
+};
+
+export type Session_Message_Assistant_Reasoning = {
+  type: "reasoning";
+  text: string;
+  native?: Session_Message_Native;
+  time?: {
+    created: number;
+    completed?: number;
+  };
+};
+
+export type Session_Message_Assistant_Retry = {
+  attempt: number;
+  at: number;
+  error: Session_StructuredError;
+};
+
+export type Session_Message_Assistant_Text = {
+  type: "text";
+  text: string;
+  native?: Session_Message_Native;
+};
+
+export type Session_Message_Assistant_Tool = {
+  type: "tool";
+  id: string;
+  name: string;
+  executed?: boolean;
+  native?: Session_Message_Native;
+  state: Session_Message_ToolState_Streaming | Session_Message_ToolState_Running | Session_Message_ToolState_Completed | Session_Message_ToolState_Error;
+  time: {
+    created: number;
+    ran?: number;
+    completed?: number;
+  };
+};
+
+export type Session_Message_AssistantContent_Encoded = Session_Message_Assistant_Text | Session_Message_Assistant_Reasoning | Session_Message_Assistant_Tool;
+
+export type Session_Message_Compaction = Session_Message_Compaction_Running | Session_Message_Compaction_Completed | Session_Message_Compaction_Failed;
+
+export type Session_Message_Compaction_Completed = {
+  type: "compaction";
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  status: "completed";
+  reason: "auto" | "manual";
+  model?: Model_Ref;
+  native?: Session_Message_Native;
+  summary: string;
+  cost?: Money_USD;
+  tokens?: TokenUsage_Info;
+};
+
+export type Session_Message_Compaction_Failed = {
+  type: "compaction";
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  status: "failed";
+  reason: "auto" | "manual";
+  error: Session_StructuredError;
+  cost?: Money_USD;
+  tokens?: TokenUsage_Info;
+};
+
+export type Session_Message_Compaction_Running = {
+  type: "compaction";
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  status: "running";
+  reason: "auto" | "manual";
+  summary: string;
+};
+
+export type Session_Message_ID = string;
+
+export type Session_Message_Idle = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  type: "idle";
+  outcome: "succeeded" | "failed" | "interrupted";
+  error?: Session_StructuredError;
+};
+
+export type Session_Message_Info = Session_Message_AgentSelected | Session_Message_ModelSelected | Session_Message_LocationSwitched | Session_Message_User | Session_Message_Synthetic | Session_Message_System | Session_Message_Skill | Session_Message_Shell | Session_Message_Assistant | Session_Message_Compaction | Session_Message_Idle;
+
+export type Session_Message_LocationSwitched = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  type: "location-switched";
+  projectID?: Project_ID;
+  subpath?: RelativePath;
+  location: Location_PublicRef;
+  previous?: {
+    location: Location_PublicRef;
+    projectID?: Project_ID;
+    subpath?: RelativePath;
+  } | null;
+};
+
+export type Session_Message_ModelSelected = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  type: "model-switched";
+  model: Model_Ref;
+  previous?: Model_Ref;
+};
+
+export type Session_Message_Native = Record<string, unknown>;
+
+export type Session_Message_Shell = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+    completed?: number;
+  };
+  type: "shell";
+  shellID: Shell_ID;
+  command: string;
+  status: "running" | "exited" | "timeout" | "killed";
+  exit?: number | ("Infinity" | "-Infinity" | "NaN");
+  output?: {
+    output: string;
+    cursor: number;
+    size: number;
+    truncated: boolean;
+  };
+};
+
+export type Session_Message_Skill = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  type: "skill";
+  skill: Skill_ID;
+  name: Skill_Name;
+  text: string;
+};
+
+export type Session_Message_Synthetic = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  text: string;
+  description?: string;
+  type: "synthetic";
+};
+
+export type Session_Message_System = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  type: "system";
+  text: string;
+  description?: string;
+};
+
+export type Session_Message_ToolState_Completed = {
+  status: "completed";
+  input: Record<string, unknown>;
+  content: Array<Tool_Content>;
+  metadata?: Record<string, unknown>;
+};
+
+export type Session_Message_ToolState_Error = {
+  status: "error";
+  input: Record<string, unknown>;
+  error: Session_StructuredError;
+  content?: Array<Tool_Content>;
+  metadata?: Record<string, unknown>;
+};
+
+export type Session_Message_ToolState_Running = {
+  status: "running";
+  input: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
+
+export type Session_Message_ToolState_Streaming = {
+  status: "streaming";
+  input: string;
+};
+
+export type Session_Message_User = {
+  id: Session_Message_ID;
+  metadata?: Record<string, unknown>;
+  time: {
+    created: number;
+  };
+  text: string;
+  files?: Array<Prompt_FileAttachment>;
+  agents?: Array<Prompt_AgentAttachment>;
+  skills?: Array<Prompt_SkillAttachment>;
+  type: "user";
+};
+
+export type Session_Metadata = Record<string, unknown>;
+
+export type Session_Revert = {
+  messageID: Session_Message_ID;
+  partID?: string;
+  snapshot?: Snapshot_ID;
+  files?: Array<FileDiff_Info>;
+};
+
+export type Session_StructuredError = {
+  type: string;
+  message: string;
+  status?: number;
+  response?: {
+    body: string;
+  };
+  retryAfterMs?: number;
+};
+
+export type SessionActive = {
+  type: "running";
+};
+
+export type SessionBusyErrorEncoded = {
+  _tag: "SessionBusyError";
+  sessionID: string;
+  message: string;
+};
+
+export type SessionGenerateResponse = {
+  data: {
+    text: string;
+    tokens: TokenUsage_Info;
+    cost: Money_USD;
+  };
+};
+
+export type SessionInterruptResponse = {
+  /** Whether an active execution owned by this OpenCode process was interrupted. */
+  interrupted: boolean;
+};
+
+export type SessionLogItem = Session_Event_Durable | EventLog_Synced;
+
+export type SessionLogItemEncoded = string;
+
+export type SessionMessagesResponse = {
+  data: Array<Session_Message_Info>;
+  cursor: {
+    previous?: string | null;
+    next?: string | null;
+  };
+};
+
+export type SessionNotFoundErrorEncoded = {
+  _tag: "SessionNotFoundError";
+  sessionID: string;
+  message: string;
+};
+
+export type SessionStats_Activity = {
+  date: string;
+  steps: number;
+};
+
+export type SessionStats_Info = {
+  range: {
+    from: number;
+    to: number;
+  };
+  sessions: number;
+  subagents: number;
+  prompts: number;
+  steps: number;
+  tokens: TokenUsage_Info;
+  cost: Money_USD;
+  tools: SessionStats_Tools;
+  activeDays: number;
+  streak: number;
+  activity: Array<SessionStats_Activity>;
+  models: Array<SessionStats_ModelUsage>;
+};
+
+export type SessionStats_ModelUsage = {
+  model: Model_Ref;
+  steps: number;
+  tokens: TokenUsage_Info;
+  cost: Money_USD;
+};
+
+export type SessionStats_ToolTotals = {
+  calls: number;
+  succeeded: number;
+  failed: number;
+  unfinished: number;
+};
+
+export type SessionStats_ToolUsage = {
+  name: string;
+  calls: number;
+  succeeded: number;
+  failed: number;
+  unfinished: number;
+  durationP50?: number;
+};
+
+export type SessionStats_Tools = {
+  mode: "none";
+} | {
+  mode: "summary";
+  totals: SessionStats_ToolTotals;
+} | {
+  mode: "detail";
+  totals: SessionStats_ToolTotals;
+  usage: Array<SessionStats_ToolUsage>;
 };
 
 export type SessionStatus = {
@@ -546,5530 +2535,1792 @@ export type SessionStatus = {
   type: "busy";
 };
 
-export type QuestionOption = {
-  /** Display text (1-5 words, concise) */
-  label: string;
-  /** Explanation of choice */
-  description: string;
-};
-
-export type QuestionInfo = {
-  /** Complete question */
-  question: string;
-  /** Very short label (max 30 chars) */
-  header: string;
-  /** Available choices */
-  options: Array<QuestionOption>;
-  multiple?: boolean;
-  custom?: boolean;
-};
-
-export type QuestionTool = {
-  messageID: string;
-  callID: string;
-};
-
-export type QuestionAnswer = Array<string>;
-
-export type GlobalEvent = {
-  directory: string;
-  project?: string;
-  workspace?: string;
-  payload: {
-    id: string;
-    type: "models-dev.refreshed";
-    properties: Record<string, unknown>;
-  } | {
-    id: string;
-    type: "integration.updated";
-    properties: Record<string, unknown>;
-  } | {
-    id: string;
-    type: "integration.connection.updated";
-    properties: {
-      integrationID: string;
-    };
-  } | {
-    id: string;
-    type: "catalog.updated";
-    properties: Record<string, unknown>;
-  } | {
-    id: string;
-    type: "session.created";
-    properties: {
-      sessionID: string;
-      info: Session;
-    };
-  } | {
-    id: string;
-    type: "session.updated";
-    properties: {
-      sessionID: string;
-      info: Session;
-    };
-  } | {
-    id: string;
-    type: "session.deleted";
-    properties: {
-      sessionID: string;
-      info: Session;
-    };
-  } | {
-    id: string;
-    type: "message.updated";
-    properties: {
-      sessionID: string;
-      info: Message;
-    };
-  } | {
-    id: string;
-    type: "message.removed";
-    properties: {
-      sessionID: string;
-      messageID: string;
-    };
-  } | {
-    id: string;
-    type: "message.part.updated";
-    properties: {
-      sessionID: string;
-      part: Part;
-      time: number;
-    };
-  } | {
-    id: string;
-    type: "message.part.removed";
-    properties: {
-      sessionID: string;
-      messageID: string;
-      partID: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.agent.switched";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      agent: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.model.switched";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      model: ModelRef;
-    };
-  } | {
-    id: string;
-    type: "session.next.moved";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      location: LocationRef;
-      subdirectory?: string;
-    };
-  } | ({
-    id: string;
-    type: "session.next.prompted";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      prompt: Prompt;
-      delivery: "steer" | "queue";
-    };
-  }) | ({
-    id: string;
-    type: "session.next.prompt.admitted";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      prompt: Prompt;
-      delivery: "steer" | "queue";
-    };
-  }) | {
-    id: string;
-    type: "session.next.context.updated";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      text: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.synthetic";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      text: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.shell.started";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      callID: string;
-      command: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.shell.ended";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      callID: string;
-      output: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.step.started";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      agent: string;
-      model: ModelRef;
-      snapshot?: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.step.ended";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      finish: string;
-      cost: number;
-      tokens: {
-        input: number;
-        output: number;
-        reasoning: number;
-        cache: {
-          read: number;
-          write: number;
-        };
-      };
-      snapshot?: string;
-      files?: Array<string>;
-    };
-  } | {
-    id: string;
-    type: "session.next.step.failed";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      error: SessionErrorUnknown;
-    };
-  } | {
-    id: string;
-    type: "session.next.text.started";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      textID: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.text.delta";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      textID: string;
-      delta: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.text.ended";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      textID: string;
-      text: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.reasoning.started";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      reasoningID: string;
-      providerMetadata?: LLMProviderMetadata;
-    };
-  } | {
-    id: string;
-    type: "session.next.reasoning.delta";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      reasoningID: string;
-      delta: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.reasoning.ended";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      reasoningID: string;
-      text: string;
-      providerMetadata?: LLMProviderMetadata;
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.input.started";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      name: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.input.delta";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      delta: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.input.ended";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      text: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.called";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      tool: string;
-      input: Record<string, unknown>;
-      provider: {
-        executed: boolean;
-        metadata?: LLMProviderMetadata;
-      };
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.progress";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      structured: Record<string, unknown>;
-      content: Array<LLMToolContent>;
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.success";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      structured: Record<string, unknown>;
-      content: Array<LLMToolContent>;
-      outputPaths?: Array<string>;
-      result?: unknown;
-      provider: {
-        executed: boolean;
-        metadata?: LLMProviderMetadata;
-      };
-    };
-  } | {
-    id: string;
-    type: "session.next.tool.failed";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      error: SessionErrorUnknown;
-      result?: unknown;
-      provider: {
-        executed: boolean;
-        metadata?: LLMProviderMetadata;
-      };
-    };
-  } | {
-    id: string;
-    type: "session.next.retried";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      attempt: number;
-      error: SessionNextRetry_error;
-    };
-  } | ({
-    id: string;
-    type: "session.next.compaction.started";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      reason: "auto" | "manual";
-    };
-  }) | {
-    id: string;
-    type: "session.next.compaction.delta";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      text: string;
-    };
-  } | ({
-    id: string;
-    type: "session.next.compaction.ended";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      reason: "auto" | "manual";
-      text: string;
-      recent: string;
-    };
-  }) | {
-    id: string;
-    type: "session.next.revert.staged";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      revert: RevertState;
-    };
-  } | {
-    id: string;
-    type: "session.next.revert.cleared";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-    };
-  } | {
-    id: string;
-    type: "session.next.revert.committed";
-    properties: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-    };
-  } | {
-    id: string;
-    type: "message.part.delta";
-    properties: {
-      sessionID: string;
-      messageID: string;
-      partID: string;
-      field: string;
-      delta: string;
-    };
-  } | {
-    id: string;
-    type: "session.diff";
-    properties: {
-      sessionID: string;
-      diff: Array<SnapshotFileDiff>;
-    };
-  } | ({
-    id: string;
-    type: "session.error";
-    properties: {
-      sessionID?: string;
-      error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | StructuredOutputError | ContextOverflowError | ContentFilterError | APIError;
-    };
-  }) | {
-    id: string;
-    type: "installation.updated";
-    properties: {
-      version: string;
-    };
-  } | {
-    id: string;
-    type: "installation.update-available";
-    properties: {
-      version: string;
-    };
-  } | {
-    id: string;
-    type: "file.edited";
-    properties: {
-      file: string;
-    };
-  } | {
-    id: string;
-    type: "reference.updated";
-    properties: Record<string, unknown>;
-  } | {
-    id: string;
-    type: "permission.v2.asked";
-    properties: {
-      id: string;
-      sessionID: string;
-      action: string;
-      resources: Array<string>;
-      save?: Array<string>;
-      metadata?: Record<string, unknown>;
-      source?: PermissionV2Source;
-    };
-  } | {
-    id: string;
-    type: "permission.v2.replied";
-    properties: {
-      sessionID: string;
-      requestID: string;
-      reply: PermissionV2Reply;
-    };
-  } | {
-    id: string;
-    type: "plugin.added";
-    properties: {
-      id: string;
-    };
-  } | {
-    id: string;
-    type: "project.directories.updated";
-    properties: {
-      projectID: string;
-    };
-  } | ({
-    id: string;
-    type: "file.watcher.updated";
-    properties: {
-      file: string;
-      event: "add" | "change" | "unlink";
-    };
-  }) | {
-    id: string;
-    type: "pty.created";
-    properties: {
-      info: Pty;
-    };
-  } | {
-    id: string;
-    type: "pty.updated";
-    properties: {
-      info: Pty;
-    };
-  } | {
-    id: string;
-    type: "pty.exited";
-    properties: {
-      id: string;
-      exitCode: number;
-    };
-  } | {
-    id: string;
-    type: "pty.deleted";
-    properties: {
-      id: string;
-    };
-  } | {
-    id: string;
-    type: "question.v2.asked";
-    properties: {
-      id: string;
-      sessionID: string;
-      /** Questions to ask */
-      questions: Array<QuestionV2Info>;
-      tool?: QuestionV2Tool;
-    };
-  } | {
-    id: string;
-    type: "question.v2.replied";
-    properties: {
-      sessionID: string;
-      requestID: string;
-      answers: Array<QuestionV2Answer>;
-    };
-  } | {
-    id: string;
-    type: "question.v2.rejected";
-    properties: {
-      sessionID: string;
-      requestID: string;
-    };
-  } | {
-    id: string;
-    type: "todo.updated";
-    properties: {
-      sessionID: string;
-      todos: Array<Todo>;
-    };
-  } | {
-    id: string;
-    type: "lsp.updated";
-    properties: Record<string, unknown>;
-  } | {
-    id: string;
-    type: "permission.asked";
-    properties: {
-      id: string;
-      sessionID: string;
-      permission: string;
-      patterns: Array<string>;
-      metadata: Record<string, unknown>;
-      always: Array<string>;
-      tool?: {
-        messageID: string;
-        callID: string;
-      };
-    };
-  } | ({
-    id: string;
-    type: "permission.replied";
-    properties: {
-      sessionID: string;
-      requestID: string;
-      reply: "once" | "always" | "reject";
-    };
-  }) | {
-    id: string;
-    type: "tui.prompt.append";
-    properties: {
-      text: string;
-    };
-  } | ({
-    id: string;
-    type: "tui.command.execute";
-    properties: {
-      command: ("session.list" | "session.new" | "session.share" | "session.interrupt" | "session.compact" | "session.page.up" | "session.page.down" | "session.line.up" | "session.line.down" | "session.half.page.up" | "session.half.page.down" | "session.first" | "session.last" | "prompt.clear" | "prompt.submit" | "agent.cycle") | string;
-    };
-  }) | ({
-    id: string;
-    type: "tui.toast.show";
-    properties: {
-      title?: string;
-      message: string;
-      variant: "info" | "success" | "warning" | "error";
-      duration?: number;
-    };
-  }) | {
-    id: string;
-    type: "tui.session.select";
-    properties: {
-      /** Session ID to navigate to */
-      sessionID: string;
-    };
-  } | {
-    id: string;
-    type: "mcp.tools.changed";
-    properties: {
-      server: string;
-    };
-  } | {
-    id: string;
-    type: "mcp.browser.open.failed";
-    properties: {
-      mcpName: string;
-      url: string;
-    };
-  } | {
-    id: string;
-    type: "command.executed";
-    properties: {
-      name: string;
-      sessionID: string;
-      arguments: string;
-      messageID: string;
-    };
-  } | {
-    id: string;
-    type: "project.updated";
-    properties: {
-      id: string;
-      worktree: string;
-      vcs?: ProjectVcs;
-      name?: string;
-      icon?: ProjectIcon;
-      commands?: ProjectCommands;
-      time: ProjectTime;
-      sandboxes: Array<string>;
-    };
-  } | {
-    id: string;
-    type: "session.status";
-    properties: {
-      sessionID: string;
-      status: SessionStatus;
-    };
-  } | {
-    id: string;
-    type: "session.idle";
-    properties: {
-      sessionID: string;
-    };
-  } | {
-    id: string;
-    type: "question.asked";
-    properties: {
-      id: string;
-      sessionID: string;
-      /** Questions to ask */
-      questions: Array<QuestionInfo>;
-      tool?: QuestionTool;
-    };
-  } | {
-    id: string;
-    type: "question.replied";
-    properties: {
-      sessionID: string;
-      requestID: string;
-      answers: Array<QuestionAnswer>;
-    };
-  } | {
-    id: string;
-    type: "question.rejected";
-    properties: {
-      sessionID: string;
-      requestID: string;
-    };
-  } | {
-    id: string;
-    type: "session.compacted";
-    properties: {
-      sessionID: string;
-    };
-  } | {
-    id: string;
-    type: "vcs.branch.updated";
-    properties: {
-      branch?: string;
-    };
-  } | {
-    id: string;
-    type: "workspace.ready";
-    properties: {
-      name: string;
-    };
-  } | {
-    id: string;
-    type: "workspace.failed";
-    properties: {
-      message: string;
-    };
-  } | ({
-    id: string;
-    type: "workspace.status";
-    properties: {
-      workspaceID: string;
-      status: "connected" | "connecting" | "disconnected" | "error";
-    };
-  }) | {
-    id: string;
-    type: "worktree.ready";
-    properties: {
-      name: string;
-      branch?: string;
-    };
-  } | {
-    id: string;
-    type: "worktree.failed";
-    properties: {
-      message: string;
-    };
-  } | {
-    id: string;
-    type: "server.connected";
-    properties: Record<string, unknown>;
-  } | {
-    id: string;
-    type: "global.disposed";
-    properties: Record<string, unknown>;
-  } | EventServerInstanceDisposed | SyncEventSessionCreated | SyncEventSessionUpdated | SyncEventSessionDeleted | SyncEventMessageUpdated | SyncEventMessageRemoved | SyncEventMessagePartUpdated | SyncEventMessagePartRemoved | SyncEventSessionNextAgentSwitched | SyncEventSessionNextModelSwitched | SyncEventSessionNextMoved | SyncEventSessionNextPrompted | SyncEventSessionNextPromptAdmitted | SyncEventSessionNextContextUpdated | SyncEventSessionNextSynthetic | SyncEventSessionNextShellStarted | SyncEventSessionNextShellEnded | SyncEventSessionNextStepStarted | SyncEventSessionNextStepEnded | SyncEventSessionNextStepFailed | SyncEventSessionNextTextStarted | SyncEventSessionNextTextEnded | SyncEventSessionNextReasoningStarted | SyncEventSessionNextReasoningEnded | SyncEventSessionNextToolInputStarted | SyncEventSessionNextToolInputEnded | SyncEventSessionNextToolCalled | SyncEventSessionNextToolProgress | SyncEventSessionNextToolSuccess | SyncEventSessionNextToolFailed | SyncEventSessionNextRetried | SyncEventSessionNextCompactionStarted | SyncEventSessionNextCompactionEnded | SyncEventSessionNextRevertStaged | SyncEventSessionNextRevertCleared | SyncEventSessionNextRevertCommitted;
-};
-
-/** Log level */
-export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
-
-/** Server configuration for opencode serve and web commands */
-export type ServerConfig = {
-  port?: number;
-  hostname?: string;
-  mdns?: boolean;
-  mdnsDomain?: string;
-  cors?: Array<string>;
-};
-
-export type PermissionActionConfig = "ask" | "allow" | "deny";
-
-export type PermissionObjectConfig = Record<string, PermissionActionConfig>;
-
-export type PermissionRuleConfig = PermissionActionConfig | PermissionObjectConfig;
-
-export type PermissionConfig = PermissionActionConfig | {
-  read?: PermissionRuleConfig;
-  edit?: PermissionRuleConfig;
-  glob?: PermissionRuleConfig;
-  grep?: PermissionRuleConfig;
-  list?: PermissionRuleConfig;
-  bash?: PermissionRuleConfig;
-  task?: PermissionRuleConfig;
-  external_directory?: PermissionRuleConfig;
-  todowrite?: PermissionActionConfig;
-  question?: PermissionActionConfig;
-  webfetch?: PermissionActionConfig;
-  websearch?: PermissionActionConfig;
-  lsp?: PermissionRuleConfig;
-  doom_loop?: PermissionActionConfig;
-  skill?: PermissionRuleConfig;
-};
-
-export type AgentConfig = {
-  model?: string;
-  variant?: string;
-  temperature?: number;
-  top_p?: number;
-  prompt?: string;
-  tools?: Record<string, boolean>;
-  disable?: boolean;
-  description?: string;
-  mode?: "subagent" | "primary" | "all";
-  hidden?: boolean;
-  options?: Record<string, unknown>;
-  /** Hex color code (e.g., #FF5733) or theme color (e.g., primary) */
-  color?: string | ("primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info");
-  steps?: number;
-  maxSteps?: number;
-  permission?: PermissionConfig;
-};
-
-export type ProviderConfig = {
-  api?: string;
-  name?: string;
-  env?: Array<string>;
-  id?: string;
-  npm?: string;
-  whitelist?: Array<string>;
-  blacklist?: Array<string>;
-  options?: {
-    apiKey?: string;
-    baseURL?: string;
-    enterpriseUrl?: string;
-    setCacheKey?: boolean;
-    /** Timeout in milliseconds for full requests to this provider. Set to false to disable timeout. */
-    timeout?: number | false;
-    /** Timeout in milliseconds to wait for response headers (default: 300000). Set to false to disable timeout. */
-    headerTimeout?: number | false;
-    /** Timeout in milliseconds between streamed SSE chunks for this provider (default: 300000). If no chunk arrives within this window, the request is aborted. Set to false to disable timeout. */
-    chunkTimeout?: number | false;
-  };
-  models?: Record<string, {
-    id?: string;
-    name?: string;
-    family?: string;
-    release_date?: string;
-    attachment?: boolean;
-    reasoning?: boolean;
-    /** Reasoning controls the model accepts, used to build its variants */
-    reasoning_options?: Array<{
-      type: "effort";
-      values: Array<string>;
-    } | {
-      type: "toggle";
-    } | {
-      type: "budget_tokens";
-      min?: number;
-      max?: number;
-    }>;
-    temperature?: boolean;
-    tool_call?: boolean;
-    interleaved?: boolean | ("reasoning" | "reasoning_content" | "reasoning_text") | string | ({
-      field: ("reasoning" | "reasoning_content" | "reasoning_text") | string;
-    });
-    cost?: {
-      input: number;
-      output: number;
-      cache_read?: number;
-      cache_write?: number;
-      context_over_200k?: {
-        input: number;
-        output: number;
-        cache_read?: number;
-        cache_write?: number;
-      };
-    };
-    limit?: {
-      context: number;
-      input?: number;
-      output: number;
-    };
-    modalities?: {
-      input?: Array<"text" | "audio" | "image" | "video" | "pdf">;
-      output?: Array<"text" | "audio" | "image" | "video" | "pdf">;
-    };
-    experimental?: boolean;
-    status?: "alpha" | "beta" | "deprecated" | "active";
-    provider?: {
-      npm?: string;
-      api?: string;
-    };
-    options?: Record<string, unknown>;
-    headers?: Record<string, string>;
-    /** Variant-specific configuration */
-    variants?: Record<string, {
-      disabled?: boolean;
-    }>;
-  }>;
-};
-
-export type McpLocalConfig = {
-  /** Type of MCP server connection */
-  type: "local";
-  /** Command and arguments to run the MCP server */
-  command: Array<string>;
-  cwd?: string;
-  environment?: Record<string, string>;
-  enabled?: boolean;
-  timeout?: number;
-};
-
-export type McpOAuthConfig = {
-  clientId?: string;
-  clientSecret?: string;
-  scope?: string;
-  callbackPort?: number;
-  redirectUri?: string;
-};
-
-export type McpRemoteConfig = {
-  /** Type of MCP server connection */
-  type: "remote";
-  /** URL of the remote MCP server */
-  url: string;
-  enabled?: boolean;
-  headers?: Record<string, string>;
-  /** OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection. */
-  oauth?: McpOAuthConfig | false;
-  timeout?: number;
-};
-
-/** @deprecated Always uses stretch layout. */
-export type LayoutConfig = "auto" | "stretch";
-
-export type ImageAttachmentConfig = {
-  auto_resize?: boolean;
-  max_width?: number;
-  max_height?: number;
-  max_base64_bytes?: number;
-};
-
-export type AttachmentConfig = {
-  image?: ImageAttachmentConfig;
-};
-
-export type Config = {
-  $schema?: string;
-  shell?: string;
-  logLevel?: LogLevel;
-  server?: ServerConfig;
-  command?: Record<string, {
-    template: string;
-    description?: string;
-    agent?: string;
-    model?: string;
-    variant?: string;
-    subtask?: boolean;
-  }>;
-  skills?: {
-    paths?: Array<string>;
-    urls?: Array<string>;
-  };
-  references?: Record<string, string | ConfigV2ReferenceGit | ConfigV2ReferenceLocal>;
-  reference?: Record<string, string | ConfigV2ReferenceGit | ConfigV2ReferenceLocal>;
-  watcher?: {
-    ignore?: Array<string>;
-  };
-  snapshot?: boolean;
-  plugin?: Array<string | unknown[]>;
-  share?: "manual" | "auto" | "disabled";
-  autoshare?: boolean;
-  /** Check for new versions and show an update notice. Updates are never installed automatically; run /update or `opencode upgrade`. Set to false to disable update checks. true and 'notify' behave the same */
-  autoupdate?: boolean | "notify";
-  disabled_providers?: Array<string>;
-  enabled_providers?: Array<string>;
-  model?: string;
-  small_model?: string;
-  default_agent?: string;
-  subagent_depth?: number;
-  username?: string;
-  mode?: {
-    build?: AgentConfig;
-    plan?: AgentConfig;
-  };
-  agent?: {
-    plan?: AgentConfig;
-    build?: AgentConfig;
-    general?: AgentConfig;
-    explore?: AgentConfig;
-    title?: AgentConfig;
-    summary?: AgentConfig;
-    compaction?: AgentConfig;
-  };
-  provider?: Record<string, ProviderConfig>;
-  mcp?: Record<string, McpLocalConfig | McpRemoteConfig | {
-    enabled: boolean;
-  }>;
-  /** Enable or configure formatters. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides. */
-  formatter?: boolean | Record<string, {
-    disabled?: boolean;
-    command?: Array<string>;
-    environment?: Record<string, string>;
-    extensions?: Array<string>;
-  }>;
-  /** Enable or configure LSP servers. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides. */
-  lsp?: boolean | (Record<string, {
-    disabled: true;
-  } | {
-    command: Array<string>;
-    extensions?: Array<string>;
-    disabled?: boolean;
-    env?: Record<string, string>;
-    initialization?: Record<string, unknown>;
-  }>);
-  instructions?: Array<string>;
-  layout?: LayoutConfig;
-  permission?: PermissionConfig;
-  tools?: Record<string, boolean>;
-  attachment?: AttachmentConfig;
-  enterprise?: {
-    url?: string;
-  };
-  tool_output?: {
-    max_lines?: number;
-    max_bytes?: number;
-  };
-  compaction?: {
-    auto?: boolean;
-    prune?: boolean;
-    tail_turns?: number;
-    preserve_recent_tokens?: number;
-    reserved?: number;
-  };
-  experimental?: {
-    disable_paste_summary?: boolean;
-    batch_tool?: boolean;
-    openTelemetry?: boolean;
-    primary_tools?: Array<string>;
-    continue_loop_on_deny?: boolean;
-    mcp_timeout?: number;
-    policies?: Array<ConfigV2ExperimentalPolicy>;
-  };
-};
-
-export type Model = {
-  id: string;
-  providerID: string;
-  api: {
-    id: string;
-    url: string;
-    npm: string;
-  };
-  name: string;
-  family?: string;
-  capabilities: {
-    temperature: boolean;
-    reasoning: boolean;
-    attachment: boolean;
-    toolcall: boolean;
-    input: {
-      text: boolean;
-      audio: boolean;
-      image: boolean;
-      video: boolean;
-      pdf: boolean;
-    };
-    output: {
-      text: boolean;
-      audio: boolean;
-      image: boolean;
-      video: boolean;
-      pdf: boolean;
-    };
-    interleaved: boolean | ({
-      field: ("reasoning" | "reasoning_content" | "reasoning_text") | string;
-    });
-  };
-  cost: {
-    input: number;
-    output: number;
-    cache: {
-      read: number;
-      write: number;
-    };
-    tiers?: Array<{
-      input: number;
-      output: number;
-      cache: {
-        read: number;
-        write: number;
-      };
-      tier: {
-        type: "context";
-        size: number;
-      };
-    }>;
-    experimentalOver200K?: {
-      input: number;
-      output: number;
-      cache: {
-        read: number;
-        write: number;
-      };
-    };
-  };
-  limit: {
-    context: number;
-    input?: number;
-    output: number;
-  };
-  status: "alpha" | "beta" | "deprecated" | "active";
-  options: Record<string, unknown>;
-  headers: Record<string, string>;
-  release_date: string;
-  variants?: Record<string, Record<string, unknown>>;
-};
-
-export type Provider = {
-  id: string;
-  name: string;
-  source: "env" | "config" | "custom" | "api";
-  env: Array<string>;
-  key?: string;
-  options: Record<string, unknown>;
-  models: Record<string, Model>;
-};
-
-export type ExperimentalCapabilities = {
-  backgroundSubagents: boolean;
-};
-
-export type ConsoleState = {
-  consoleManagedProviders: Array<string>;
-  activeOrgName?: string;
-  switchableOrgCount: number;
-};
-
-export type effect_HttpApiError_InternalServerError = {
-  _tag: "InternalServerError";
-};
-
-export type ToolListItem = {
-  id: string;
-  description: string;
-  parameters: unknown;
-};
-
-export type ToolList = Array<ToolListItem>;
-
-export type ToolIDs = Array<string>;
-
-export type WorktreeError = {
-  name: "WorktreeNotGitError" | "WorktreeNameGenerationFailedError" | "WorktreeCreateFailedError" | "WorktreeStartCommandFailedError" | "WorktreeRemoveFailedError" | "WorktreeResetFailedError" | "WorktreeListFailedError";
-  data: {
-    message: string;
-  };
-};
-
-export type WorktreeCreateInput = {
-  name?: string;
-  /** Additional startup script to run after the project's start command */
-  startCommand?: string;
-};
-
-export type Worktree = {
-  name: string;
-  branch?: string;
-  directory: string;
-};
-
-export type WorktreeRemoveInput = {
-  directory: string;
-};
-
-export type WorktreeResetInput = {
-  directory: string;
-};
-
-export type ProjectSummary = {
-  id: string;
-  name?: string;
-  worktree: string;
-};
-
-export type GlobalSession = {
-  id: string;
-  slug: string;
-  projectID: string;
-  workspaceID?: string;
-  directory: string;
-  path?: string;
-  parentID?: string;
-  summary?: {
-    additions: number;
-    deletions: number;
-    files: number;
-    diffs?: Array<SnapshotFileDiff>;
-  };
-  cost?: number;
-  tokens?: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: {
-      read: number;
-      write: number;
-    };
-  };
-  share?: {
-    url: string;
-  };
-  title: string;
-  agent?: string;
-  model?: {
-    id: string;
-    providerID: string;
-    variant?: string;
-  };
-  version: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-    updated: number;
-    compacting?: number;
-    archived?: number;
-  };
-  permission?: PermissionRuleset;
-  revert?: {
-    messageID: string;
-    partID?: string;
-    snapshot?: string;
-    diff?: string;
-  };
-  project: ProjectSummary | null;
-};
-
-export type McpResource = {
-  name: string;
-  uri: string;
-  description?: string;
-  mimeType?: string;
-  client: string;
-};
-
-export type Symbol = {
-  name: string;
-  kind: number;
-  location: {
-    uri: string;
-    range: Range;
-  };
-};
-
-export type FileNode = {
-  name: string;
-  path: string;
-  absolute: string;
-  type: "file" | "directory";
-  ignored: boolean;
-};
-
-export type FileContent = {
-  type: "text" | "binary";
-  content: string;
-  diff?: string;
-  patch?: {
-    oldFileName: string;
-    newFileName: string;
-    oldHeader?: string;
-    newHeader?: string;
-    hunks: Array<{
-      oldStart: number;
-      oldLines: number;
-      newStart: number;
-      newLines: number;
-      lines: Array<string>;
-    }>;
-    index?: string;
-  };
-  encoding?: "base64";
-  mimeType?: string;
-};
-
-export type File = {
-  path: string;
-  added: number;
-  removed: number;
-  status: "added" | "deleted" | "modified";
-};
-
-export type Path = {
-  home: string;
-  state: string;
-  config: string;
-  worktree: string;
-  directory: string;
-};
-
-export type VcsInfo = {
-  branch?: string;
-  default_branch?: string;
-};
-
-export type VcsFileStatus = {
-  file: string;
-  additions: number;
-  deletions: number;
-  status: "added" | "deleted" | "modified";
-};
-
-export type VcsFileDiff = {
-  file: string;
-  patch?: string;
-  additions: number;
-  deletions: number;
-  status?: "added" | "deleted" | "modified";
-};
-
-export type VcsApplyError = {
-  name: "VcsApplyError";
-  data: {
-    message: string;
-    reason: "non-git" | "not-clean";
-  };
-};
-
-export type Command = {
-  name: string;
-  description?: string;
-  agent?: string;
-  model?: string;
-  source?: "command" | "mcp" | "skill";
-  template: string;
-  subtask?: boolean;
-  hints: Array<string>;
-};
-
-export type Agent = {
-  name: string;
-  description?: string;
-  mode: "subagent" | "primary" | "all";
-  native?: boolean;
-  hidden?: boolean;
-  topP?: number;
-  temperature?: number;
-  color?: string;
-  permission: PermissionRuleset;
-  model?: {
-    modelID: string;
-    providerID: string;
-  };
-  variant?: string;
-  prompt?: string;
-  options: Record<string, unknown>;
-  steps?: number;
-};
-
-export type LSPStatus = {
-  id: string;
-  name: string;
-  root: string;
-  status: "connected" | "error";
-};
-
-export type FormatterStatus = {
-  name: string;
-  extensions: Array<string>;
-  enabled: boolean;
-};
-
-export type MCPStatusConnected = {
-  status: "connected";
-};
-
-export type MCPStatusDisabled = {
-  status: "disabled";
-};
-
-export type MCPStatusFailed = {
-  status: "failed";
-  error: string;
-};
-
-export type MCPStatusNeedsAuth = {
-  status: "needs_auth";
-};
-
-export type MCPStatusNeedsClientRegistration = {
-  status: "needs_client_registration";
-  error: string;
-};
-
-export type MCPStatus = MCPStatusConnected | MCPStatusDisabled | MCPStatusFailed | MCPStatusNeedsAuth | MCPStatusNeedsClientRegistration;
-
-export type McpUnsupportedOAuthError = {
-  error: string;
-};
-
-export type McpServerNotFoundError = {
-  _tag: "McpServerNotFoundError";
-  name: string;
-  message: string;
-};
-
-export type Project = {
-  id: string;
-  worktree: string;
-  vcs?: ProjectVcs;
-  name?: string;
-  icon?: ProjectIcon;
-  commands?: ProjectCommands;
-  time: ProjectTime;
-  sandboxes: Array<string>;
-};
-
-export type ProjectNotFoundError = {
-  _tag: "ProjectNotFoundError";
-  projectID: string;
-  message: string;
-};
-
-export type PtyNotFoundError = {
-  _tag: "PtyNotFoundError";
-  ptyID: string;
-  message: string;
-};
-
-export type PtyForbiddenError = {
-  _tag: "PtyForbiddenError";
-  message: string;
-};
-
-export type QuestionRequest = {
-  id: string;
-  sessionID: string;
-  /** Questions to ask */
-  questions: Array<QuestionInfo>;
-  tool?: QuestionTool;
-};
-
-export type QuestionNotFoundError = {
-  _tag: "QuestionNotFoundError";
-  requestID: string;
-  message: string;
-};
-
-export type PermissionRequest = {
-  id: string;
-  sessionID: string;
-  permission: string;
-  patterns: Array<string>;
-  metadata: Record<string, unknown>;
-  always: Array<string>;
-  tool?: {
-    messageID: string;
-    callID: string;
-  };
-};
-
-export type PermissionNotFoundError = {
-  _tag: "PermissionNotFoundError";
-  requestID: string;
-  message: string;
-};
-
-export type ProviderAuthMethod = {
-  type: "oauth" | "api";
-  label: string;
-  prompts?: Array<({
-    type: "text";
-    key: string;
-    message: string;
-    placeholder?: string;
-    when?: {
-      key: string;
-      op: "eq" | "neq";
-      value: string;
-    };
-  }) | ({
-    type: "select";
-    key: string;
-    message: string;
-    options: Array<{
-      label: string;
-      value: string;
-      hint?: string;
-    }>;
-    when?: {
-      key: string;
-      op: "eq" | "neq";
-      value: string;
-    };
-  })>;
-};
-
-export type ProviderAuthAuthorization = {
-  url: string;
-  method: "auto" | "code";
-  instructions: string;
-};
-
-export type ProviderAuthError1 = {
-  name: "BadRequest" | "ProviderAuthOauthMissing" | "ProviderAuthOauthCodeMissing" | "ProviderAuthOauthCallbackFailed" | "ProviderAuthValidationFailed";
-  data: {
-    providerID?: string;
-    field?: string;
-    message?: string;
-    kind?: string;
-  };
-};
-
-export type NotFoundError = {
-  name: "NotFoundError";
-  data: {
-    message: string;
-  };
-};
-
-export type TextPartInput = {
-  id?: string;
-  type: "text";
-  text: string;
-  synthetic?: boolean;
-  ignored?: boolean;
-  time?: {
-    start: number;
-    end?: number;
-  };
-  metadata?: Record<string, unknown>;
-};
-
-export type FilePartInput = {
-  id?: string;
-  type: "file";
-  mime: string;
-  filename?: string;
-  url: string;
-  source?: FilePartSource;
-};
-
-export type AgentPartInput = {
-  id?: string;
-  type: "agent";
-  name: string;
-  source?: {
-    value: string;
-    start: number;
-    end: number;
-  };
-};
-
-export type SubtaskPartInput = {
-  id?: string;
-  type: "subtask";
-  prompt: string;
-  description: string;
-  agent: string;
-  model?: {
-    providerID: string;
-    modelID: string;
-  };
-  command?: string;
-};
-
-export type SessionBusyError = {
-  _tag: "SessionBusyError";
-  sessionID: string;
-  message: string;
-};
-
-export type EventTuiPromptAppend = {
-  type: "tui.prompt.append";
-  properties: {
-    text: string;
-  };
-};
-
-export type EventTuiCommandExecute = {
-  type: "tui.command.execute";
-  properties: {
-    command: ("session.list" | "session.new" | "session.share" | "session.interrupt" | "session.compact" | "session.page.up" | "session.page.down" | "session.line.up" | "session.line.down" | "session.half.page.up" | "session.half.page.down" | "session.first" | "session.last" | "prompt.clear" | "prompt.submit" | "agent.cycle") | string;
-  };
-};
-
-export type EventTuiToastShow = {
-  type: "tui.toast.show";
-  properties: {
-    title?: string;
-    message: string;
-    variant: "info" | "success" | "warning" | "error";
-    duration?: number;
-  };
-};
-
-export type EventTuiSessionSelect = {
-  type: "tui.session.select";
-  properties: {
-    /** Session ID to navigate to */
-    sessionID: string;
-  };
-};
-
-export type Workspace = {
-  id: string;
-  type: string;
-  name: string;
-  branch?: string | null;
-  directory?: string | null;
-  extra?: unknown | null;
-  projectID: string;
-  timeUsed: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-};
-
-export type WorkspaceCreateError = {
-  name: "WorkspaceCreateError";
-  data: {
-    message: string;
-  };
-};
-
-export type WorkspaceWarpError = {
-  name: "WorkspaceWarpError";
-  data: {
-    message: string;
-  };
-};
-
-export type UnauthorizedError = {
-  _tag: "UnauthorizedError";
-  message: string;
-};
-
-export type SessionsResponse = {
-  data: Array<SessionV2Info>;
-  cursor: {
-    previous?: string;
-    next?: string;
-  };
-};
-
-export type InvalidCursorError = {
-  _tag: "InvalidCursorError";
-  message: string;
-};
-
-export type SessionActive = {
-  type: "running";
-};
-
-export type SessionNotFoundError = {
-  _tag: "SessionNotFoundError";
-  sessionID: string;
-  message: string;
-};
-
-export type PromptInput = {
-  text: string;
-  files?: Array<PromptInputFileAttachment>;
-  agents?: Array<PromptAgentAttachment>;
-};
-
-export type ConflictError = {
-  _tag: "ConflictError";
-  message: string;
-  resource?: string;
-};
-
-export type ServiceUnavailableError = {
-  _tag: "ServiceUnavailableError";
-  message: string;
-  service?: string;
-};
-
-export type MessageNotFoundError = {
-  _tag: "MessageNotFoundError";
-  sessionID: string;
-  messageID: string;
-  message: string;
-};
-
-export type UnknownError1 = {
-  _tag: "UnknownError";
-  message: string;
-  ref?: string;
-};
-
-export type SessionDurableEvent = SessionNextAgentSwitched | SessionNextModelSwitched | SessionNextMoved | SessionNextPrompted | SessionNextPromptAdmitted | SessionNextContextUpdated | SessionNextSynthetic | SessionNextShellStarted | SessionNextShellEnded | SessionNextStepStarted | SessionNextStepEnded | SessionNextStepFailed | SessionNextTextStarted | SessionNextTextEnded | SessionNextToolInputStarted | SessionNextToolInputEnded | SessionNextToolCalled | SessionNextToolProgress | SessionNextToolSuccess | SessionNextToolFailed | SessionNextReasoningStarted | SessionNextReasoningEnded | SessionNextRetried | SessionNextCompactionStarted | SessionNextCompactionEnded | SessionNextRevertStaged | SessionNextRevertCleared | SessionNextRevertCommitted;
-
-export type SessionHistory = {
-  data: Array<SessionDurableEvent>;
-  hasMore: boolean;
-};
-
-export type SessionDurableEventStream = string;
-
-export type SessionMessagesResponse = {
-  data: Array<SessionMessage>;
-  cursor: {
-    previous?: string;
-    next?: string;
-  };
-};
-
-export type ProviderNotFoundError = {
-  _tag: "ProviderNotFoundError";
-  providerID: string;
-  message: string;
-};
-
-export type OutputFormat1 = {
-  type: "text";
-} | {
-  type: "json_schema";
-  schema: JSONSchema;
-  retryCount?: number;
-};
-
-export type session_status = {
-  id: string;
+export type SessionStatusUpdated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
   type: "session.status";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    sessionID: string;
+    sessionID: Session_ID;
     status: SessionStatus;
   };
 };
 
-export type question_replied = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "question.replied";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    requestID: string;
-    answers: Array<QuestionAnswer>;
-  };
+export type SessionTransfer_Data = {
+  info: Session_Info;
+  messages: Array<Session_Message_Info>;
 };
 
-export type question_rejected = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "question.rejected";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    requestID: string;
+/** Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response. */
+export type SessionsCursor = string;
+
+export type SessionsResponse = {
+  data: Array<Session_Info>;
+  cursor: {
+    previous?: SessionsCursor | null;
+    next?: SessionsCursor | null;
   };
 };
 
-export type V2Event = Models_devRefreshed | IntegrationUpdated | IntegrationConnectionUpdated | CatalogUpdated | SessionCreated | SessionUpdated | SessionDeleted | MessageUpdated | MessageRemoved | MessagePartUpdated | MessagePartRemoved | SessionNextAgentSwitched | SessionNextModelSwitched | SessionNextMoved | SessionNextPrompted | SessionNextPromptAdmitted | SessionNextContextUpdated | SessionNextSynthetic | SessionNextShellStarted | SessionNextShellEnded | SessionNextStepStarted | SessionNextStepEnded | SessionNextStepFailed | SessionNextTextStarted | SessionNextTextDelta | SessionNextTextEnded | SessionNextReasoningStarted | SessionNextReasoningDelta | SessionNextReasoningEnded | SessionNextToolInputStarted | SessionNextToolInputDelta | SessionNextToolInputEnded | SessionNextToolCalled | SessionNextToolProgress | SessionNextToolSuccess | SessionNextToolFailed | SessionNextRetried | SessionNextCompactionStarted | SessionNextCompactionDelta | SessionNextCompactionEnded | SessionNextRevertStaged | SessionNextRevertCleared | SessionNextRevertCommitted | MessagePartDelta | SessionDiff | SessionError | InstallationUpdated | InstallationUpdate_available | FileEdited | ReferenceUpdated | PermissionV2Asked | PermissionV2Replied | PluginAdded | ProjectDirectoriesUpdated | FileWatcherUpdated | PtyCreated | PtyUpdated | PtyExited | PtyDeleted | QuestionV2Asked | QuestionV2Replied | QuestionV2Rejected | TodoUpdated | LspUpdated | PermissionAsked | PermissionReplied | TuiPromptAppend | TuiCommandExecute | TuiToastShow | TuiSessionSelect | McpToolsChanged | McpBrowserOpenFailed | CommandExecuted | ProjectUpdated | session_status | SessionIdle | QuestionAsked | question_replied | question_rejected | SessionCompacted | VcsBranchUpdated | WorkspaceReady | WorkspaceFailed | WorkspaceStatus | WorktreeReady | WorktreeFailed | ServerConnected | GlobalDisposed;
-
-export type V2EventStream = string;
-
-export type ForbiddenError = {
-  _tag: "ForbiddenError";
-  message: string;
-};
-
-export type ProjectCopyError = {
-  name: "ProjectCopyError";
-  data: {
-    message: string;
-    forceRequired?: boolean;
-  };
-};
-
-export type effect_HttpApiError_Forbidden = {
-  _tag: "Forbidden";
-};
-
-export type Event_tui_prompt_append = {
-  id: string;
-  type: "tui.prompt.append";
-  properties: {
-    text: string;
-  };
-};
-
-export type Event_tui_command_execute = {
-  id: string;
-  type: "tui.command.execute";
-  properties: {
-    command: ("session.list" | "session.new" | "session.share" | "session.interrupt" | "session.compact" | "session.page.up" | "session.page.down" | "session.line.up" | "session.line.down" | "session.half.page.up" | "session.half.page.down" | "session.first" | "session.last" | "prompt.clear" | "prompt.submit" | "agent.cycle") | string;
-  };
-};
-
-export type Event_tui_toast_show = {
-  id: string;
-  type: "tui.toast.show";
-  properties: {
-    title?: string;
-    message: string;
-    variant: "info" | "success" | "warning" | "error";
-    duration?: number;
-  };
-};
-
-export type Event_tui_session_select = {
-  id: string;
-  type: "tui.session.select";
-  properties: {
-    /** Session ID to navigate to */
-    sessionID: string;
-  };
-};
-
-export type CredentialValue = CredentialOAuth | CredentialKey;
-
-export type IntegrationInputs = Record<string, string>;
-
-export type IntegrationMethod = IntegrationOAuthMethod | IntegrationKeyMethod | IntegrationEnvMethod;
-
-export type IntegrationRef = {
-  id: string;
-  name: string;
-};
-
-export type SkillV2Source = SkillV2DirectorySource | SkillV2UrlSource | SkillV2EmbeddedSource;
-
-export type MoveSessionDestination = {
-  directory: string;
-};
-
-export type ModelRef = {
-  id: string;
-  providerID: string;
-  variant?: string;
-};
-
-export type LocationRef = {
-  directory: string;
-  workspaceID?: string;
-};
-
-export type PromptSource = {
-  start: number;
-  end: number;
-  text: string;
-};
-
-export type PromptFileAttachment = {
-  uri: string;
-  mime: string;
-  name?: string;
-  description?: string;
-  source?: PromptSource;
-};
-
-export type PromptAgentAttachment = {
-  name: string;
-  source?: PromptSource;
-};
-
-export type SessionErrorUnknown = {
-  type: "unknown";
-  message: string;
-};
-
-export type LLMProviderMetadata = Record<string, Record<string, unknown>>;
-
-export type ToolTextContent = {
-  type: "text";
-  text: string;
-};
-
-export type ToolFileContent = {
-  type: "file";
-  uri: string;
-  mime: string;
-  name?: string;
-};
-
-export type LLMToolContent = ToolTextContent | ToolFileContent;
-
-export type SessionNextRetry_error = {
-  message: string;
-  statusCode?: number;
-  isRetryable: boolean;
-  responseHeaders?: Record<string, string>;
-  responseBody?: string;
-  metadata?: Record<string, string>;
-};
-
-export type FileDiff = {
-  path: string;
-  status: "added" | "modified" | "deleted";
-  additions: number;
-  deletions: number;
-  patch: string;
-};
-
-export type RevertState = {
-  messageID: string;
-  partID?: string;
-  snapshot?: string;
-  diff?: string;
-  files?: Array<FileDiff>;
-};
-
-export type PermissionV2Source = {
-  type: "tool";
-  messageID: string;
-  callID: string;
-};
-
-export type PermissionV2Reply = "once" | "always" | "reject";
-
-export type QuestionV2Option = {
-  /** Display text (1-5 words, concise) */
-  label: string;
-  /** Explanation of choice */
-  description: string;
-};
-
-export type QuestionV2Info = {
-  /** Complete question */
-  question: string;
-  /** Very short label (max 30 chars) */
-  header: string;
-  /** Available choices */
-  options: Array<QuestionV2Option>;
-  multiple?: boolean;
-  custom?: boolean;
-};
-
-export type QuestionV2Tool = {
-  messageID: string;
-  callID: string;
-};
-
-export type QuestionV2Answer = Array<string>;
-
-export type ProjectVcs = "git";
-
-export type ProjectIcon = {
-  url?: string;
-  override?: string;
-  color?: string;
-};
-
-export type ProjectCommands = {
-  /** Startup script to run when creating a new workspace (worktree) */
-  start?: string;
-};
-
-export type ProjectTime = {
-  created: number;
-  updated: number;
-  initialized?: number;
-};
-
-export type EventServerInstanceDisposed = {
-  id: string;
-  type: "server.instance.disposed";
-  properties: {
-    directory: string;
-  };
-};
-
-export type SyncEventSessionCreated = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.created.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      info: Session;
-    };
-  };
-};
-
-export type SyncEventSessionUpdated = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.updated.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      info: Session;
-    };
-  };
-};
-
-export type SyncEventSessionDeleted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.deleted.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      info: Session;
-    };
-  };
-};
-
-export type SyncEventMessageUpdated = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "message.updated.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      info: Message;
-    };
-  };
-};
-
-export type SyncEventMessageRemoved = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "message.removed.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      messageID: string;
-    };
-  };
-};
-
-export type SyncEventMessagePartUpdated = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "message.part.updated.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      part: Part;
-      time: number;
-    };
-  };
-};
-
-export type SyncEventMessagePartRemoved = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "message.part.removed.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      sessionID: string;
-      messageID: string;
-      partID: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextAgentSwitched = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.agent.switched.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      agent: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextModelSwitched = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.model.switched.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      model: ModelRef;
-    };
-  };
-};
-
-export type SyncEventSessionNextMoved = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.moved.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      location: LocationRef;
-      subdirectory?: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextPrompted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.prompted.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      prompt: Prompt;
-      delivery: "steer" | "queue";
-    };
-  };
-};
-
-export type SyncEventSessionNextPromptAdmitted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.prompt.admitted.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      prompt: Prompt;
-      delivery: "steer" | "queue";
-    };
-  };
-};
-
-export type SyncEventSessionNextContextUpdated = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.context.updated.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      text: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextSynthetic = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.synthetic.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      text: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextShellStarted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.shell.started.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      callID: string;
-      command: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextShellEnded = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.shell.ended.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      callID: string;
-      output: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextStepStarted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.step.started.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      agent: string;
-      model: ModelRef;
-      snapshot?: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextStepEnded = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.step.ended.2";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      finish: string;
-      cost: number;
-      tokens: {
-        input: number;
-        output: number;
-        reasoning: number;
-        cache: {
-          read: number;
-          write: number;
-        };
-      };
-      snapshot?: string;
-      files?: Array<string>;
-    };
-  };
-};
-
-export type SyncEventSessionNextStepFailed = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.step.failed.2";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      error: SessionErrorUnknown;
-    };
-  };
-};
-
-export type SyncEventSessionNextTextStarted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.text.started.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      textID: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextTextEnded = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.text.ended.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      textID: string;
-      text: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextReasoningStarted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.reasoning.started.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      reasoningID: string;
-      providerMetadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type SyncEventSessionNextReasoningEnded = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.reasoning.ended.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      reasoningID: string;
-      text: string;
-      providerMetadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type SyncEventSessionNextToolInputStarted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.tool.input.started.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      name: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextToolInputEnded = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.tool.input.ended.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      text: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextToolCalled = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.tool.called.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      tool: string;
-      input: Record<string, unknown>;
-      provider: {
-        executed: boolean;
-        metadata?: LLMProviderMetadata;
-      };
-    };
-  };
-};
-
-export type SyncEventSessionNextToolProgress = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.tool.progress.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      structured: Record<string, unknown>;
-      content: Array<LLMToolContent>;
-    };
-  };
-};
-
-export type SyncEventSessionNextToolSuccess = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.tool.success.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      structured: Record<string, unknown>;
-      content: Array<LLMToolContent>;
-      outputPaths?: Array<string>;
-      result?: unknown;
-      provider: {
-        executed: boolean;
-        metadata?: LLMProviderMetadata;
-      };
-    };
-  };
-};
-
-export type SyncEventSessionNextToolFailed = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.tool.failed.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      assistantMessageID: string;
-      callID: string;
-      error: SessionErrorUnknown;
-      result?: unknown;
-      provider: {
-        executed: boolean;
-        metadata?: LLMProviderMetadata;
-      };
-    };
-  };
-};
-
-export type SyncEventSessionNextRetried = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.retried.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      attempt: number;
-      error: SessionNextRetry_error;
-    };
-  };
-};
-
-export type SyncEventSessionNextCompactionStarted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.compaction.started.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      reason: "auto" | "manual";
-    };
-  };
-};
-
-export type SyncEventSessionNextCompactionEnded = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.compaction.ended.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-      reason: "auto" | "manual";
-      text: string;
-      recent: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextRevertStaged = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.revert.staged.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      revert: RevertState;
-    };
-  };
-};
-
-export type SyncEventSessionNextRevertCleared = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.revert.cleared.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-    };
-  };
-};
-
-export type SyncEventSessionNextRevertCommitted = {
-  type: "sync";
-  id: string;
-  syncEvent: {
-    type: "session.next.revert.committed.1";
-    id: string;
-    seq: number;
-    aggregateID: string;
-    data: {
-      timestamp: number;
-      sessionID: string;
-      messageID: string;
-    };
-  };
-};
-
-export type ConfigV2ReferenceGit = {
-  repository: string;
-  branch?: string;
-  description?: string;
-  hidden?: boolean;
-};
-
-export type ConfigV2ReferenceLocal = {
-  path: string;
-  description?: string;
-  hidden?: boolean;
-};
-
-export type PolicyEffect = "allow" | "deny";
-
-export type ConfigV2ExperimentalPolicy = {
-  action: "provider.use";
-  effect: PolicyEffect;
-  resource: string;
-};
-
-export type ProjectDirectories = Array<{
-  directory: string;
-  strategy?: string;
-}>;
-
-export type PtyTicketConnectToken = {
-  ticket: string;
-  expires_in: number;
-};
-
-export type WorkspaceEventConnectionStatus = {
-  workspaceID: string;
-  status: "connected" | "connecting" | "disconnected" | "error";
-};
-
-export type LocationInfo = {
-  directory: string;
-  workspaceID?: string;
-  project: {
-    id: string;
-    directory: string;
-  };
-};
-
-export type ProviderRequest = {
-  headers: Record<string, string>;
-  body: Record<string, unknown>;
-};
-
-export type AgentColor = string | ("primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info");
-
-export type PermissionV2Effect = "allow" | "deny" | "ask";
-
-export type PermissionV2Rule = {
-  action: string;
-  resource: string;
-  effect: PermissionV2Effect;
-};
-
-export type PermissionV2Ruleset = Array<PermissionV2Rule>;
-
-export type AgentV2Info = {
-  id: string;
-  model?: ModelRef;
-  request: ProviderRequest;
-  system?: string;
-  description?: string;
-  mode: "subagent" | "primary" | "all";
-  hidden: boolean;
-  color?: AgentColor;
-  steps?: number;
-  permissions: PermissionV2Ruleset;
-};
-
-export type SessionV2Info = {
-  id: string;
-  parentID?: string;
-  projectID: string;
-  agent?: string;
-  model?: ModelRef;
-  cost: number;
-  tokens: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: {
-      read: number;
-      write: number;
-    };
-  };
-  time: {
-    created: number;
-    updated: number;
-    archived?: number;
-  };
-  title: string;
-  location: LocationRef;
-  subpath?: string;
-  revert?: RevertState;
-};
-
-export type PromptInputFileAttachment = {
-  uri: string;
-  name?: string;
-  description?: string;
-  source?: PromptSource;
-};
-
-export type SessionInputAdmitted = {
-  admittedSeq: number;
-  id: string;
-  sessionID: string;
-  prompt: Prompt;
-  delivery: "steer" | "queue";
-  timeCreated: number;
-  promotedSeq?: number;
-};
-
-export type SessionMessageAgentSwitched = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-  };
-  type: "agent-switched";
-  agent: string;
-};
-
-export type SessionMessageModelSwitched = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-  };
-  type: "model-switched";
-  model: ModelRef;
-};
-
-export type SessionMessageUser = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-  };
-  text: string;
-  files?: Array<PromptFileAttachment>;
-  agents?: Array<PromptAgentAttachment>;
-  type: "user";
-};
-
-export type SessionMessageSynthetic = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-  };
-  sessionID: string;
-  text: string;
-  type: "synthetic";
-};
-
-export type SessionMessageSystem = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-  };
-  type: "system";
-  text: string;
-};
-
-export type SessionMessageShell = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-    completed?: number;
-  };
-  type: "shell";
-  callID: string;
+export type Shell_ID = string;
+
+export type Shell_Info = {
+  id: Shell_ID;
+  status: "running" | "exited" | "timeout" | "killed";
   command: string;
-  output: string;
-};
-
-export type SessionMessageAssistantText = {
-  type: "text";
-  id: string;
-  text: string;
-};
-
-export type SessionMessageAssistantReasoning = {
-  type: "reasoning";
-  id: string;
-  text: string;
-  providerMetadata?: LLMProviderMetadata;
-  time?: {
-    created: number;
+  cwd: string;
+  shell: string;
+  file: string;
+  pid?: number;
+  exit?: number;
+  signal?: string;
+  metadata: Record<string, unknown>;
+  time: {
+    /** Start time in milliseconds since the Unix epoch */
+    started: number;
     completed?: number;
   };
 };
 
-export type SessionMessageToolStatePending = {
-  status: "pending";
-  input: string;
-};
-
-export type SessionMessageToolStateRunning = {
-  status: "running";
-  input: Record<string, unknown>;
-  structured: Record<string, unknown>;
-  content: Array<LLMToolContent>;
-};
-
-export type SessionMessageToolStateCompleted = {
-  status: "completed";
-  input: Record<string, unknown>;
-  attachments?: Array<PromptFileAttachment>;
-  content: Array<LLMToolContent>;
-  outputPaths?: Array<string>;
-  structured: Record<string, unknown>;
-  result?: unknown;
-};
-
-export type SessionMessageToolStateError = {
-  status: "error";
-  input: Record<string, unknown>;
-  content: Array<LLMToolContent>;
-  structured: Record<string, unknown>;
-  error: SessionErrorUnknown;
-  result?: unknown;
-};
-
-export type SessionMessageAssistantTool = {
-  type: "tool";
+export type ShellNotFoundErrorEncoded = {
+  _tag: "ShellNotFoundError";
   id: string;
-  name: string;
-  provider?: {
-    executed: boolean;
-    metadata?: LLMProviderMetadata;
-    resultMetadata?: LLMProviderMetadata;
-  };
-  state: SessionMessageToolStatePending | SessionMessageToolStateRunning | SessionMessageToolStateCompleted | SessionMessageToolStateError;
-  time: {
-    created: number;
-    ran?: number;
-    completed?: number;
-    pruned?: number;
-  };
+  message: string;
 };
 
-export type SessionMessageAssistant = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-    completed?: number;
-  };
-  type: "assistant";
-  agent: string;
-  model: ModelRef;
-  content: Array<SessionMessageAssistantText | SessionMessageAssistantReasoning | SessionMessageAssistantTool>;
-  snapshot?: {
-    start?: string;
-    end?: string;
-    files?: Array<string>;
-  };
-  finish?: string;
-  cost?: number;
-  tokens?: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: {
-      read: number;
-      write: number;
-    };
-  };
-  error?: SessionErrorUnknown;
+export type Skill_ID = string;
+
+export type Skill_Info = {
+  id: Skill_ID;
+  name: Skill_Name;
+  description?: string;
+  autoinvoke?: boolean;
+  path: AbsolutePath;
+  content: string;
 };
 
-export type SessionMessageCompaction = {
-  type: "compaction";
-  reason: "auto" | "manual";
-  summary: string;
-  recent: string;
-  id: string;
-  metadata?: Record<string, unknown>;
-  time: {
-    created: number;
-  };
+export type Skill_Name = string;
+
+export type SkillNotFoundErrorEncoded = {
+  _tag: "SkillNotFoundError";
+  skill: Skill_ID;
+  message: string;
 };
 
-export type SessionMessage = SessionMessageAgentSwitched | SessionMessageModelSwitched | SessionMessageUser | SessionMessageSynthetic | SessionMessageSystem | SessionMessageShell | SessionMessageAssistant | SessionMessageCompaction;
+export type Snapshot_ID = string;
 
-export type SessionNextAgentSwitched = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.agent.switched";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    agent: string;
-  };
-};
-
-export type SessionNextModelSwitched = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.model.switched";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    model: ModelRef;
-  };
-};
-
-export type SessionNextMoved = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.moved";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    location: LocationRef;
-    subdirectory?: string;
-  };
-};
-
-export type SessionNextPrompted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.prompted";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    prompt: Prompt;
-    delivery: "steer" | "queue";
-  };
-};
-
-export type SessionNextPromptAdmitted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.prompt.admitted";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    prompt: Prompt;
-    delivery: "steer" | "queue";
-  };
-};
-
-export type SessionNextContextUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.context.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    text: string;
-  };
-};
-
-export type SessionNextSynthetic = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.synthetic";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    text: string;
-  };
-};
-
-export type SessionNextShellStarted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.shell.started";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    callID: string;
-    command: string;
-  };
-};
-
-export type SessionNextShellEnded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.shell.ended";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    callID: string;
-    output: string;
-  };
-};
-
-export type SessionNextStepStarted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.step.started";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    agent: string;
-    model: ModelRef;
-    snapshot?: string;
-  };
-};
-
-export type SessionNextStepEnded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.step.ended";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    finish: string;
-    cost: number;
-    tokens: {
-      input: number;
-      output: number;
-      reasoning: number;
-      cache: {
-        read: number;
-        write: number;
-      };
-    };
-    snapshot?: string;
-    files?: Array<string>;
-  };
-};
-
-export type SessionNextStepFailed = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.step.failed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    error: SessionErrorUnknown;
-  };
-};
-
-export type SessionNextTextStarted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.text.started";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    textID: string;
-  };
-};
-
-export type SessionNextTextEnded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.text.ended";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    textID: string;
-    text: string;
-  };
-};
-
-export type SessionNextToolInputStarted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.input.started";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    name: string;
-  };
-};
-
-export type SessionNextToolInputEnded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.input.ended";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    text: string;
-  };
-};
-
-export type SessionNextToolCalled = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.called";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    tool: string;
-    input: Record<string, unknown>;
-    provider: {
-      executed: boolean;
-      metadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type SessionNextToolProgress = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.progress";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    structured: Record<string, unknown>;
-    content: Array<LLMToolContent>;
-  };
-};
-
-export type SessionNextToolSuccess = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.success";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    structured: Record<string, unknown>;
-    content: Array<LLMToolContent>;
-    outputPaths?: Array<string>;
-    result?: unknown;
-    provider: {
-      executed: boolean;
-      metadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type SessionNextToolFailed = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.failed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    error: SessionErrorUnknown;
-    result?: unknown;
-    provider: {
-      executed: boolean;
-      metadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type SessionNextReasoningStarted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.reasoning.started";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    reasoningID: string;
-    providerMetadata?: LLMProviderMetadata;
-  };
-};
-
-export type SessionNextReasoningEnded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.reasoning.ended";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    reasoningID: string;
-    text: string;
-    providerMetadata?: LLMProviderMetadata;
-  };
-};
-
-export type SessionNextRetried = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.retried";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    attempt: number;
-    error: SessionNextRetry_error;
-  };
-};
-
-export type SessionNextCompactionStarted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.compaction.started";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    reason: "auto" | "manual";
-  };
-};
-
-export type SessionNextCompactionEnded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.compaction.ended";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    reason: "auto" | "manual";
-    text: string;
-    recent: string;
-  };
-};
-
-export type SessionNextRevertStaged = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.revert.staged";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    revert: RevertState;
-  };
-};
-
-export type SessionNextRevertCleared = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.revert.cleared";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-  };
-};
-
-export type SessionNextRevertCommitted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.revert.committed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-  };
-};
-
-export type ModelApi = {
-  id: string;
-  type: "aisdk";
-  package: string;
-  url?: string;
-  settings?: Record<string, unknown>;
-} | {
-  id: string;
-  type: "native";
-  url?: string;
-  settings: Record<string, unknown>;
-};
-
-export type ModelCapabilities = {
-  tools: boolean;
-  input: Array<string>;
-  output: Array<string>;
-};
-
-export type ModelCost = {
-  tier?: {
-    type: "context";
-    size: number;
-  };
+export type TokenUsage_Info = {
   input: number;
   output: number;
+  reasoning: number;
   cache: {
     read: number;
     write: number;
   };
 };
 
-export type ModelV2Info = {
-  id: string;
-  providerID: string;
-  family?: string;
-  name: string;
-  api: ModelApi;
-  capabilities: ModelCapabilities;
-  request: {
-    headers: Record<string, string>;
-    body: Record<string, unknown>;
-    variant?: string;
-  };
-  variants: Array<{
-    id: string;
-    headers: Record<string, string>;
-    body: Record<string, unknown>;
-  }>;
-  time: {
-    released: number;
-  };
-  cost: Array<ModelCost>;
-  status: "alpha" | "beta" | "deprecated" | "active";
-  enabled: boolean;
-  limit: {
-    context: number;
-    input?: number;
-    output: number;
-  };
+export type Tool_Content = Tool_TextContent | Tool_FileContent;
+
+export type Tool_FileContent = {
+  type: "file";
+  uri: string;
+  mime: string;
+  name?: string | null;
 };
 
-export type ProviderAISDK = {
-  type: "aisdk";
-  package: string;
-  url?: string;
-  settings?: Record<string, unknown>;
-};
-
-export type ProviderNative = {
-  type: "native";
-  url?: string;
-  settings: Record<string, unknown>;
-};
-
-export type ProviderApi = ProviderAISDK | ProviderNative;
-
-export type ProviderV2Info = {
-  id: string;
-  integrationID?: string;
-  name: string;
-  disabled?: boolean;
-  api: ProviderApi;
-  request: ProviderRequest;
-};
-
-export type IntegrationWhen = {
-  key: string;
-  op: "eq" | "neq";
-  value: string;
-};
-
-export type IntegrationTextPrompt = {
+export type Tool_TextContent = {
   type: "text";
-  key: string;
+  text: string;
+};
+
+export type UnauthorizedErrorEncoded = {
+  _tag: "UnauthorizedError";
   message: string;
-  placeholder?: string;
-  when?: IntegrationWhen;
 };
 
-export type IntegrationSelectPrompt = {
-  type: "select";
-  key: string;
+export type UnknownErrorEncoded = {
+  _tag: "UnknownError";
   message: string;
-  options: Array<{
-    label: string;
-    value: string;
-    hint?: string;
-  }>;
-  when?: IntegrationWhen;
+  ref?: string | null;
 };
 
-export type IntegrationOAuthMethod = {
+export type UnsupportedModelErrorEncoded = {
+  _tag: "UnsupportedModelError";
+  providerID: string;
+  modelID: string;
+  capability: string;
+  message: string;
+};
+
+export type UsageLimits_Budget = {
   id: string;
-  type: "oauth";
-  label: string;
-  prompts?: Array<IntegrationTextPrompt | IntegrationSelectPrompt>;
+  limit: Money_USD;
+  spent: Money_USD;
+  scope: "each" | "combined";
+  per: "set" | "model";
+  coverage: "all" | "models";
+  models: Array<UsageLimits_BudgetModel>;
+  vendors: Array<string>;
+  inputPriceAtLeast?: Money_USDPerMillionTokens;
+  picked: boolean;
+  shared: boolean;
+  /** Milliseconds since the Unix epoch */
+  resetsAt: number;
 };
 
-export type IntegrationKeyMethod = {
-  type: "key";
-  label?: string;
-};
-
-export type IntegrationEnvMethod = {
-  type: "env";
-  names: Array<string>;
-};
-
-export type ConnectionCredentialInfo = {
-  type: "credential";
-  id: string;
-  label: string;
-};
-
-export type ConnectionEnvInfo = {
-  type: "env";
+export type UsageLimits_BudgetModel = {
+  providerID: Provider_ID;
+  modelID: string;
   name: string;
+  spent?: Money_USD;
 };
 
-export type ConnectionInfo = ConnectionCredentialInfo | ConnectionEnvInfo;
+export type UsageLimits_Go = {
+  rolling: UsageLimits_Meter;
+  weekly: UsageLimits_Meter;
+  monthly: UsageLimits_Meter;
+};
 
-export type IntegrationInfo = {
-  id: string;
+export type UsageLimits_Info = {
+  workspace: {
+    id: string;
+    name?: string;
+    usageURL: string;
+  };
+  go?: UsageLimits_Go;
+  budgets: Array<UsageLimits_Budget>;
+};
+
+export type UsageLimits_Meter = {
+  percent: number;
+  limited: boolean;
+  /** Milliseconds since the Unix epoch */
+  resetsAt: number;
+};
+
+export type V2Event = location_shutdown | models_dev_refreshed | credential_updated | credential_switched | integration_updated | provider_updated | model_updated | agent_updated | session_created | session_agent_selected | session_model_selected | session_moved | session_renamed | session_metadata_updated | session_permissions | session_viewed | session_archived | session_unarchived | session_usage_updated | session_deleted | session_forked | session_inbox_delivered | session_inbox_enqueued | session_inbox_cancelled | session_inbox_delivery_changed | session_execution_started | session_execution_succeeded | session_execution_failed | session_execution_interrupted | session_instructions_updated | session_synthetic | session_skill_activated | session_shell_started | session_shell_ended | session_step_started | session_step_streamed | session_step_ended | session_step_failed | session_text_started | session_text_delta | session_text_ended | session_reasoning_started | session_reasoning_delta | session_reasoning_ended | session_tool_input_started | session_tool_input_delta | session_tool_input_ended | session_tool_called | session_tool_progress | session_tool_success | session_tool_failed | session_retry_scheduled | session_compaction_started | session_compaction_delta | session_compaction_ended | session_compaction_failed | session_revert_staged | session_revert_cleared | session_revert_committed | filesystem_changed | reference_updated | permission_asked | permission_replied | plugin_updated | project_updated | worktree_updated | worktree_resolved | command_updated | config_updated | skill_updated | pty_created | pty_updated | pty_exited | pty_deleted | persistent_pty_added | persistent_pty_removed | persistent_pty_updated | shell_created | shell_exited | shell_deleted | form_created | form_replied | form_cancelled | websearch_updated | artifact_updated | SessionStatusUpdated | session_idle | tui_prompt_append | tui_command_execute | tui_toast_show | tui_session_select | installation_updated | installation_update_available | vcs_branch_updated | mcp_status_changed | mcp_resources_changed | V2Event_rpc | V2Event_server_connected;
+
+export type V2Event_rpc = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown> | null;
+  type: string;
+  location: Location_PublicRef;
+  data: Record<string, unknown>;
+};
+
+export type V2Event_server_connected = {
+  id: Event_ID;
+  metadata?: Record<string, unknown> | null;
+  location?: Location_PublicRef | null;
+  type: "server.connected";
+  data: unknown;
+};
+
+export type V2EventEncoded = string;
+
+export type Vcs_Base = {
   name: string;
-  methods: Array<IntegrationMethod>;
-  connections: Array<ConnectionInfo>;
+  ref: string;
+  source: "reflog" | "default";
 };
 
-export type IntegrationAttempt = {
-  attemptID: string;
+export type Vcs_Branch = {
+  current?: string;
+  default?: string;
+};
+
+export type Vcs_BranchList = Array<string>;
+
+export type Vcs_FileStatus = {
+  file: string;
+  additions: number;
+  deletions: number;
+  status: "added" | "deleted" | "modified";
+};
+
+export type Vcs_Info = {
+  provider?: string;
+  branch: Vcs_Branch;
+};
+
+export type Vcs_Mode = "working" | "branch" | "committed";
+
+export type Vcs_Untracked = "files" | "folders";
+
+export type VcsInitNotSupportedErrorEncoded = {
+  _tag: "VcsInitNotSupportedError";
+  providerID: string;
+  message: string;
+};
+
+export type VoiceModel = {
+  model: string;
+  provider: string;
+  transports: Array<VoiceTransportType>;
+  available: boolean;
+};
+
+export type VoiceModelsResponse = {
+  data: {
+    models: Array<VoiceModel>;
+    default?: string | null;
+  };
+};
+
+export type VoiceSessionResponse = {
+  data: {
+    transport: VoiceTransport;
+  };
+};
+
+export type VoiceTransport = VoiceWebRTCTransport | VoiceWebSocketTransport;
+
+export type VoiceTransportInput = VoiceWebRTCTransportInput | VoiceWebSocketTransportInput;
+
+export type VoiceTransportType = "webrtc" | "websocket";
+
+export type VoiceWebRTCTransport = {
+  type: "webrtc";
+  sdp: string;
+};
+
+export type VoiceWebRTCTransportInput = {
+  type: "webrtc";
+  sdp: string;
+  dcid?: number | ("Infinity" | "-Infinity" | "NaN") | null;
+};
+
+export type VoiceWebSocketTransport = {
+  type: "websocket";
   url: string;
-  instructions: string;
-  mode: "auto" | "code";
-  time: {
-    created: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-    expires: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-  };
+  token: string;
+  expiresAt: number | ("Infinity" | "-Infinity" | "NaN");
 };
 
-export type IntegrationAttemptStatus = ({
-  status: "pending";
-  time: {
-    created: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-    expires: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-  };
-}) | ({
-  status: "complete";
-  time: {
-    created: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-    expires: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-  };
-}) | ({
-  status: "failed";
-  message: string;
-  time: {
-    created: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-    expires: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-  };
-}) | ({
-  status: "expired";
-  time: {
-    created: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-    expires: number | "NaN" | "Infinity" | "-Infinity" | ("Infinity" | "-Infinity" | "NaN");
-  };
-});
-
-export type PermissionV2Request = {
-  id: string;
-  sessionID: string;
-  action: string;
-  resources: Array<string>;
-  save?: Array<string>;
-  metadata?: Record<string, unknown>;
-  source?: PermissionV2Source;
+export type VoiceWebSocketTransportInput = {
+  type: "websocket";
 };
 
-export type PermissionSavedInfo = {
-  id: string;
-  projectID: string;
-  action: string;
-  resource: string;
-};
+export type WebSearch_ID = string;
 
-export type FileSystemEntry = {
-  path: string;
-  type: "file" | "directory";
-};
-
-export type CommandV2Info = {
+export type WebSearch_Provider = {
+  id: WebSearch_ID;
   name: string;
-  template: string;
-  description?: string;
-  agent?: string;
-  model?: ModelRef;
-  subtask?: boolean;
 };
 
-export type SkillV2Info = {
-  name: string;
-  description?: string;
-  slash?: boolean;
-  location: string;
-  content: string;
+export type WebSearch_ResponseEncoded = {
+  providerID: WebSearch_ID;
+  results: Array<WebSearch_Result>;
 };
 
-export type Models_devRefreshed = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "models-dev.refreshed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
+export type WebSearch_Result = {
+  url: string;
+  title?: string;
+  content?: string;
+  time: {
+    published?: number;
   };
-  location?: LocationRef;
-  data: Record<string, unknown>;
 };
 
-export type IntegrationUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "integration.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: Record<string, unknown>;
+export type Workspace_ID = string;
+
+export type Worktree_CreateInput = {
+  projectID: Project_ID;
+  from?: AbsolutePath;
+  branch?: string;
+  directory?: AbsolutePath;
+  name?: string;
 };
 
-export type IntegrationConnectionUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "integration.connection.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+export type Worktree_Directory = {
+  directory: AbsolutePath;
+  strategy?: string;
+};
+
+export type Worktree_Info = {
+  directory: AbsolutePath;
+};
+
+export type Worktree_List = Array<Worktree_Directory>;
+
+export type Worktree_RemoveInput = {
+  projectID: Project_ID;
+  directory: AbsolutePath;
+  force: boolean;
+};
+
+export type WorktreeErrorEncoded = {
+  _tag: "WorktreeError";
+  name: "WorktreeError";
   data: {
-    integrationID: string;
+    message: string;
+    forceRequired?: boolean | null;
   };
 };
 
-export type CatalogUpdated = {
-  id: string;
+export type agent_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "catalog.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: Record<string, unknown>;
+  type: "agent.updated";
+  location?: Location_Ref;
+  data: unknown;
 };
 
-export type SessionCreated = {
-  id: string;
+export type artifact_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "session.created";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "artifact.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type command_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "command.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type config_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "config.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type credential_switched = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "credential.switched";
+  location?: Location_Ref;
   data: {
-    sessionID: string;
-    info: Session;
+    integrationID: Integration_ID;
+    credentialID: Credential_ID | null;
   };
 };
 
-export type SessionUpdated = {
-  id: string;
+export type credential_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "session.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "credential.updated";
+  location?: Location_Ref;
   data: {
-    sessionID: string;
-    info: Session;
+    integrationID: Integration_ID;
+    credentialID: Credential_ID;
   };
 };
 
-export type SessionDeleted = {
-  id: string;
+export type filesystem_changed = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "session.deleted";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    info: Session;
-  };
-};
-
-export type MessageUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "message.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    info: Message;
-  };
-};
-
-export type MessageRemoved = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "message.removed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    messageID: string;
-  };
-};
-
-export type MessagePartUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "message.part.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    part: Part;
-    time: number;
-  };
-};
-
-export type MessagePartRemoved = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "message.part.removed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    messageID: string;
-    partID: string;
-  };
-};
-
-export type SessionNextTextDelta = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.text.delta";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    textID: string;
-    delta: string;
-  };
-};
-
-export type SessionNextReasoningDelta = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.reasoning.delta";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    reasoningID: string;
-    delta: string;
-  };
-};
-
-export type SessionNextToolInputDelta = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.tool.input.delta";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    delta: string;
-  };
-};
-
-export type SessionNextCompactionDelta = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.next.compaction.delta";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    text: string;
-  };
-};
-
-export type MessagePartDelta = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "message.part.delta";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    messageID: string;
-    partID: string;
-    field: string;
-    delta: string;
-  };
-};
-
-export type SessionDiff = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.diff";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    diff: Array<SnapshotFileDiff>;
-  };
-};
-
-export type SessionError = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.error";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID?: string;
-    error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | StructuredOutputError | ContextOverflowError | ContentFilterError | APIError;
-  };
-};
-
-export type InstallationUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "installation.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    version: string;
-  };
-};
-
-export type InstallationUpdate_available = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "installation.update-available";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    version: string;
-  };
-};
-
-export type FileEdited = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "file.edited";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    file: string;
-  };
-};
-
-export type ReferenceUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "reference.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: Record<string, unknown>;
-};
-
-export type PermissionV2Asked = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "permission.v2.asked";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    id: string;
-    sessionID: string;
-    action: string;
-    resources: Array<string>;
-    save?: Array<string>;
-    metadata?: Record<string, unknown>;
-    source?: PermissionV2Source;
-  };
-};
-
-export type PermissionV2Replied = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "permission.v2.replied";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-    requestID: string;
-    reply: PermissionV2Reply;
-  };
-};
-
-export type PluginAdded = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "plugin.added";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    id: string;
-  };
-};
-
-export type ProjectDirectoriesUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "project.directories.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    projectID: string;
-  };
-};
-
-export type FileWatcherUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "file.watcher.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "filesystem.changed";
+  location?: Location_Ref;
   data: {
     file: string;
     event: "add" | "change" | "unlink";
   };
 };
 
-export type PtyCreated = {
-  id: string;
+export type form_cancelled = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "form.cancelled";
+  location?: Location_Ref;
+  data: {
+    id: Form_ID;
+    sessionID: string;
+  };
+};
+
+export type form_created = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "form.created";
+  location?: Location_Ref;
+  data: {
+    form: Form_Info_1;
+  };
+};
+
+export type form_replied = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "form.replied";
+  location?: Location_Ref;
+  data: {
+    id: Form_ID;
+    sessionID: string;
+    answer: Form_Answer_1;
+  };
+};
+
+export type installation_update_available = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "installation.update-available";
+  location?: Location_Ref;
+  data: {
+    version: string;
+  };
+};
+
+export type installation_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "installation.updated";
+  location?: Location_Ref;
+  data: {
+    version: string;
+  };
+};
+
+export type integration_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "integration.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type location_shutdown = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "location.shutdown";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type mcp_resources_changed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "mcp.resources.changed";
+  location?: Location_Ref;
+  data: {
+    server: string;
+  };
+};
+
+export type mcp_status_changed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "mcp.status.changed";
+  location?: Location_Ref;
+  data: {
+    server: string;
+  };
+};
+
+export type model_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "model.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type models_dev_refreshed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "models-dev.refreshed";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type permission_asked = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "permission.asked";
+  location?: Location_Ref;
+  data: {
+    id: Permission_ID;
+    sessionID: Session_ID;
+    action: string;
+    resources: Array<string>;
+    save?: Array<string>;
+    metadata?: Record<string, unknown>;
+    source?: Permission_Source;
+    message?: string;
+  };
+};
+
+export type permission_replied = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "permission.replied";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    requestID: Permission_ID;
+    reply: Permission_Reply;
+  };
+};
+
+export type persistent_pty_added = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "persistent-pty.added";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    terminal: PersistentPty_Info;
+  };
+};
+
+export type persistent_pty_removed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "persistent-pty.removed";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    ptyID: Pty_ID;
+  };
+};
+
+export type persistent_pty_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "persistent-pty.updated";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    terminal: PersistentPty_Info;
+  };
+};
+
+export type plugin_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "plugin.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type project_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "project.updated";
+  location?: Location_Ref;
+  data: {
+    id: Project_ID;
+    canonical: AbsolutePath;
+    vcs?: Project_Vcs;
+    name?: string;
+    icon?: Project_Icon;
+    commands?: Project_Commands;
+    time: Project_Time;
+    sandboxes: Array<string>;
+  };
+};
+
+export type provider_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "provider.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type pty_created = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
   type: "pty.created";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
     info: Pty;
   };
 };
 
-export type PtyUpdated = {
-  id: string;
+export type pty_deleted = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "pty.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "pty.deleted";
+  location?: Location_Ref;
   data: {
-    info: Pty;
+    id: Pty_ID;
   };
 };
 
-export type PtyExited = {
-  id: string;
+export type pty_exited = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
   type: "pty.exited";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    id: string;
+    id: Pty_ID;
     exitCode: number;
   };
 };
 
-export type PtyDeleted = {
-  id: string;
+export type pty_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "pty.deleted";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "pty.updated";
+  location?: Location_Ref;
   data: {
-    id: string;
+    info: Pty;
   };
 };
 
-export type QuestionV2Asked = {
-  id: string;
+export type reference_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "question.v2.asked";
-  durable?: {
+  type: "reference.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type session_agent_selected = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.agent.selected";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    id: string;
-    sessionID: string;
-    /** Questions to ask */
-    questions: Array<QuestionV2Info>;
-    tool?: QuestionV2Tool;
+    sessionID: Session_ID;
+    agent: Agent_ID;
+    previous?: Agent_ID;
   };
 };
 
-export type QuestionV2Replied = {
-  id: string;
+export type session_archived = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "question.v2.replied";
-  durable?: {
+  type: "session.archived";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    sessionID: string;
-    requestID: string;
-    answers: Array<QuestionV2Answer>;
+    sessionID: Session_ID;
   };
 };
 
-export type QuestionV2Rejected = {
-  id: string;
+export type session_compaction_delta = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "question.v2.rejected";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "session.compaction.delta";
+  location?: Location_Ref;
   data: {
-    sessionID: string;
-    requestID: string;
+    sessionID: Session_ID;
+    text: string;
   };
 };
 
-export type TodoUpdated = {
-  id: string;
+export type session_compaction_ended = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "todo.updated";
-  durable?: {
+  type: "session.compaction.ended";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    sessionID: string;
-    todos: Array<Todo>;
+    sessionID: Session_ID;
+    reason: "auto" | "manual";
+    model?: Model_Ref;
+    native?: Session_Message_Native;
+    text: string;
+    cost?: Money_USD;
+    tokens?: TokenUsage_Info;
   };
 };
 
-export type LspUpdated = {
-  id: string;
+export type session_compaction_failed = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "lsp.updated";
-  durable?: {
+  type: "session.compaction.failed";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
-  data: Record<string, unknown>;
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    reason: "auto" | "manual";
+    error: Session_StructuredError;
+    inputID?: Session_Message_ID;
+    cost?: Money_USD;
+    tokens?: TokenUsage_Info;
+  };
 };
 
-export type PermissionAsked = {
-  id: string;
+export type session_compaction_started = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "permission.asked";
-  durable?: {
+  type: "session.compaction.started";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    id: string;
-    sessionID: string;
-    permission: string;
-    patterns: Array<string>;
-    metadata: Record<string, unknown>;
-    always: Array<string>;
-    tool?: {
-      messageID: string;
-      callID: string;
+    sessionID: Session_ID;
+    reason: "auto" | "manual";
+    inputID?: Session_Message_ID;
+  };
+};
+
+export type session_created = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.created";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    projectID: Project_ID;
+    location: Location_Ref;
+    subpath?: RelativePath;
+    parentID?: Session_ID;
+    slug: string;
+    title?: string;
+    agent?: Agent_ID;
+    model?: Model_Ref;
+    metadata?: Session_Metadata;
+    permissions?: Permission_Ruleset;
+    version: string;
+  };
+};
+
+export type session_deleted = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.deleted";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c3ea984aceae;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+  };
+};
+
+export type session_execution_failed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.execution.failed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    error: Session_StructuredError;
+  };
+};
+
+export type session_execution_interrupted = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.execution.interrupted";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    reason: "user" | "shutdown" | "superseded" | "inactivity";
+  };
+};
+
+export type session_execution_started = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.execution.started";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+  };
+};
+
+export type session_execution_succeeded = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.execution.succeeded";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+  };
+};
+
+export type session_forked = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.forked";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c3ea984aceae;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    parentID: Session_ID;
+    boundary: Session_ForkBoundary;
+    instructions?: Record<string, never>;
+    instructionEntries?: InstructionEntry_Snapshot;
+  };
+};
+
+export type session_idle = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.idle";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+  };
+};
+
+export type session_inbox_cancelled = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.inbox.cancelled";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    inboxID: Session_Message_ID;
+  };
+};
+
+export type session_inbox_delivered = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.inbox.delivered";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    inboxID: Session_Message_ID;
+  };
+};
+
+export type session_inbox_delivery_changed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.inbox.delivery.changed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    inboxID: Session_Message_ID;
+    delivery: Session_Inbox_Delivery;
+  };
+};
+
+export type session_inbox_enqueued = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.inbox.enqueued";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    inboxID: Session_Message_ID;
+    item: Session_Inbox_Item;
+  };
+};
+
+export type session_instructions_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.instructions.updated";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c3ea984aceae;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    delta: Record<string, Instruction_Hash | "removed">;
+    text?: string;
+  };
+};
+
+export type session_message_content_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.message.content.updated";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    messageID: Session_Message_ID;
+    content: Array<Session_Message_AssistantContent_Encoded>;
+  };
+};
+
+export type session_metadata_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.metadata.updated";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    metadata: Session_Metadata;
+  };
+};
+
+export type session_model_selected = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.model.selected";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    model: Model_Ref;
+    previous?: Model_Ref;
+  };
+};
+
+export type session_moved = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.moved";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    location: Location_Ref;
+    projectID: Project_ID;
+    subpath?: RelativePath;
+  };
+};
+
+export type session_permissions = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.permissions";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    permissions: Permission_Ruleset;
+  };
+};
+
+export type session_reasoning_delta = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.reasoning.delta";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    ordinal: number;
+    delta: string;
+  };
+};
+
+export type session_reasoning_ended = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.reasoning.ended";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    ordinal: number;
+    text: string;
+    native?: Session_Message_Native;
+  };
+};
+
+export type session_reasoning_started = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.reasoning.started";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    ordinal: number;
+    native?: Session_Message_Native;
+  };
+};
+
+export type session_renamed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.renamed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    title: string;
+  };
+};
+
+export type session_retry_scheduled = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.retry.scheduled";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    attempt: number;
+    at: number;
+    error: Session_StructuredError;
+  };
+};
+
+export type session_revert_cleared = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.revert.cleared";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+  };
+};
+
+export type session_revert_committed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.revert.committed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    to: Session_Message_ID;
+  };
+};
+
+export type session_revert_staged = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.revert.staged";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    revert: Session_Revert;
+  };
+};
+
+export type session_shell_ended = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.shell.ended";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    shell: Shell_Info;
+    output: {
+      output: string;
+      cursor: number;
+      size: number;
+      truncated: boolean;
     };
   };
 };
 
-export type PermissionReplied = {
-  id: string;
+export type session_shell_started = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "permission.replied";
-  durable?: {
+  type: "session.shell.started";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    sessionID: string;
-    requestID: string;
-    reply: "once" | "always" | "reject";
+    sessionID: Session_ID;
+    shell: Shell_Info;
   };
 };
 
-export type TuiPromptAppend = {
-  id: string;
+export type session_skill_activated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.skill.activated";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    id: Skill_ID;
+    name: Skill_Name;
+    text: string;
+  };
+};
+
+export type session_step_ended = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.step.ended";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown";
+    rawFinish?: string;
+    native?: Session_Message_Native;
+    cost: Money_USD;
+    tokens: TokenUsage_Info;
+    snapshot?: Snapshot_ID;
+    files?: Array<RelativePath>;
+  };
+};
+
+export type session_step_failed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.step.failed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    error: Session_StructuredError;
+    finish?: "content-filter";
+    rawFinish?: string;
+    native?: Session_Message_Native;
+    cost?: Money_USD;
+    tokens?: TokenUsage_Info;
+    snapshot?: Snapshot_ID;
+    files?: Array<RelativePath>;
+  };
+};
+
+export type session_step_started = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.step.started";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    agent: Agent_ID;
+    model: Model_Ref;
+    snapshot?: Snapshot_ID;
+    started: number;
+  };
+};
+
+export type session_step_streamed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.step.streamed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+  };
+};
+
+export type session_synthetic = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.synthetic";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    text: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  };
+};
+
+export type session_text_delta = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.text.delta";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    ordinal: number;
+    delta: string;
+  };
+};
+
+export type session_text_ended = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.text.ended";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    ordinal: number;
+    text: string;
+    native?: Session_Message_Native;
+  };
+};
+
+export type session_text_started = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.text.started";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    ordinal: number;
+  };
+};
+
+export type session_tool_called = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.called";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    input: Record<string, unknown>;
+    executed: boolean;
+    native?: Session_Message_Native;
+  };
+};
+
+export type session_tool_failed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.failed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c3ea984aceae;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    error: Session_StructuredError;
+    content?: Array<Tool_Content>;
+    metadata?: Record<string, unknown>;
+    executed: boolean;
+    native?: Session_Message_Native;
+  };
+};
+
+export type session_tool_input_delta = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.input.delta";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    delta: string;
+  };
+};
+
+export type session_tool_input_ended = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.input.ended";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    text: string;
+  };
+};
+
+export type session_tool_input_started = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.input.started";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    name: string;
+  };
+};
+
+export type session_tool_progress = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.progress";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    metadata: Record<string, unknown>;
+  };
+};
+
+export type session_tool_success = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.tool.success";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c3ea984aceae;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    assistantMessageID: Session_Message_ID;
+    id: string;
+    content: Array<Tool_Content>;
+    metadata?: Record<string, unknown>;
+    executed: boolean;
+    native?: Session_Message_Native;
+  };
+};
+
+export type session_unarchived = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.unarchived";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+  };
+};
+
+export type session_usage_recorded = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.usage.recorded";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    source: "title" | "compaction" | "generate";
+    cost: Money_USD;
+    tokens: TokenUsage_Info;
+  };
+};
+
+export type session_usage_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.usage.updated";
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    cost: Money_USD;
+    tokens: TokenUsage_Info;
+  };
+};
+
+export type session_viewed = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "session.viewed";
+  durable: {
+    aggregateID: string;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
+  };
+  location?: Location_Ref;
+  data: {
+    sessionID: Session_ID;
+    idle: number;
+  };
+};
+
+export type shell_created = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "shell.created";
+  location?: Location_Ref;
+  data: {
+    info: Shell_Info;
+  };
+};
+
+export type shell_deleted = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "shell.deleted";
+  location?: Location_Ref;
+  data: {
+    id: Shell_ID;
+  };
+};
+
+export type shell_exited = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "shell.exited";
+  location?: Location_Ref;
+  data: {
+    id: Shell_ID;
+    exit?: number;
+    status: "running" | "exited" | "timeout" | "killed";
+  };
+};
+
+export type skill_updated = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "skill.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type tui_command_execute = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "tui.command.execute";
+  location?: Location_Ref;
+  data: {
+    command: ("session.list" | "session.new" | "session.interrupt" | "session.background" | "session.compact" | "session.page.up" | "session.page.down" | "session.line.up" | "session.line.down" | "session.half.page.up" | "session.half.page.down" | "session.first" | "session.last" | "prompt.clear" | "prompt.submit" | "agent.cycle") | string;
+  };
+};
+
+export type tui_prompt_append = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
   type: "tui.prompt.append";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
     text: string;
   };
 };
 
-export type TuiCommandExecute = {
-  id: string;
+export type tui_session_select = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "tui.command.execute";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "tui.session.select";
+  location?: Location_Ref;
   data: {
-    command: ("session.list" | "session.new" | "session.share" | "session.interrupt" | "session.compact" | "session.page.up" | "session.page.down" | "session.line.up" | "session.line.down" | "session.half.page.up" | "session.half.page.down" | "session.first" | "session.last" | "prompt.clear" | "prompt.submit" | "agent.cycle") | string;
+    sessionID: Session_ID & unknown;
   };
 };
 
-export type TuiToastShow = {
-  id: string;
+export type tui_toast_show = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
   type: "tui.toast.show";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
     title?: string;
     message: string;
     variant: "info" | "success" | "warning" | "error";
-    duration?: number;
+    duration?: number | null;
   };
 };
 
-export type TuiSessionSelect = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "tui.session.select";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    /** Session ID to navigate to */
-    sessionID: string;
-  };
-};
-
-export type McpToolsChanged = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "mcp.tools.changed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    server: string;
-  };
-};
-
-export type McpBrowserOpenFailed = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "mcp.browser.open.failed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    mcpName: string;
-    url: string;
-  };
-};
-
-export type CommandExecuted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "command.executed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    name: string;
-    sessionID: string;
-    arguments: string;
-    messageID: string;
-  };
-};
-
-export type ProjectUpdated = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "project.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    id: string;
-    worktree: string;
-    vcs?: ProjectVcs;
-    name?: string;
-    icon?: ProjectIcon;
-    commands?: ProjectCommands;
-    time: ProjectTime;
-    sandboxes: Array<string>;
-  };
-};
-
-export type SessionIdle = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.idle";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-  };
-};
-
-export type QuestionAsked = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "question.asked";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    id: string;
-    sessionID: string;
-    /** Questions to ask */
-    questions: Array<QuestionInfo>;
-    tool?: QuestionTool;
-  };
-};
-
-export type SessionCompacted = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "session.compacted";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    sessionID: string;
-  };
-};
-
-export type VcsBranchUpdated = {
-  id: string;
+export type vcs_branch_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
   type: "vcs.branch.updated";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
     branch?: string;
   };
 };
 
-export type WorkspaceReady = {
-  id: string;
+export type websearch_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "workspace.ready";
-  durable?: {
+  type: "websearch.updated";
+  location?: Location_Ref;
+  data: unknown;
+};
+
+export type worktree_resolved = {
+  id: Event_ID;
+  created: number;
+  metadata?: Record<string, unknown>;
+  type: "worktree.resolved";
+  durable: {
     aggregateID: string;
-    seq: number;
-    version: number;
+    seq: Event_Seq;
+    version: Event_VersionEncoded_c77c5abcb68d;
   };
-  location?: LocationRef;
+  location?: Location_Ref;
   data: {
-    name: string;
+    projectID: Project_ID;
+    directory: AbsolutePath;
+    previous: Project_ID;
+    adopted?: Array<Project_ID>;
   };
 };
 
-export type WorkspaceFailed = {
-  id: string;
+export type worktree_updated = {
+  id: Event_ID;
+  created: number;
   metadata?: Record<string, unknown>;
-  type: "workspace.failed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
+  type: "worktree.updated";
+  location?: Location_Ref;
   data: {
-    message: string;
-  };
-};
-
-export type WorkspaceStatus = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "workspace.status";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    workspaceID: string;
-    status: "connected" | "connecting" | "disconnected" | "error";
-  };
-};
-
-export type WorktreeReady = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "worktree.ready";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    name: string;
-    branch?: string;
-  };
-};
-
-export type WorktreeFailed = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "worktree.failed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: {
-    message: string;
-  };
-};
-
-export type ServerConnected = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "server.connected";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: Record<string, unknown>;
-};
-
-export type GlobalDisposed = {
-  id: string;
-  metadata?: Record<string, unknown>;
-  type: "global.disposed";
-  durable?: {
-    aggregateID: string;
-    seq: number;
-    version: number;
-  };
-  location?: LocationRef;
-  data: Record<string, unknown>;
-};
-
-export type QuestionV2Request = {
-  id: string;
-  sessionID: string;
-  /** Questions to ask */
-  questions: Array<QuestionV2Info>;
-  tool?: QuestionV2Tool;
-};
-
-export type QuestionV2Reply = {
-  /** User answers in order of questions (each answer is an array of selected labels) */
-  answers: Array<QuestionV2Answer>;
-};
-
-export type ReferenceLocalSource = {
-  type: "local";
-  path: string;
-  description?: string;
-  hidden?: boolean;
-};
-
-export type ReferenceGitSource = {
-  type: "git";
-  repository: string;
-  branch?: string;
-  description?: string;
-  hidden?: boolean;
-};
-
-export type ReferenceSource = ReferenceLocalSource | ReferenceGitSource;
-
-export type ReferenceInfo = {
-  name: string;
-  path: string;
-  description?: string;
-  hidden?: boolean;
-  source: ReferenceSource;
-};
-
-export type ProjectCopyCopy = {
-  directory: string;
-};
-
-export type EventModels_devRefreshed = {
-  id: string;
-  type: "models-dev.refreshed";
-  properties: Record<string, unknown>;
-};
-
-export type EventIntegrationUpdated = {
-  id: string;
-  type: "integration.updated";
-  properties: Record<string, unknown>;
-};
-
-export type EventIntegrationConnectionUpdated = {
-  id: string;
-  type: "integration.connection.updated";
-  properties: {
-    integrationID: string;
-  };
-};
-
-export type EventCatalogUpdated = {
-  id: string;
-  type: "catalog.updated";
-  properties: Record<string, unknown>;
-};
-
-export type EventSessionCreated = {
-  id: string;
-  type: "session.created";
-  properties: {
-    sessionID: string;
-    info: Session;
-  };
-};
-
-export type EventSessionUpdated = {
-  id: string;
-  type: "session.updated";
-  properties: {
-    sessionID: string;
-    info: Session;
-  };
-};
-
-export type EventSessionDeleted = {
-  id: string;
-  type: "session.deleted";
-  properties: {
-    sessionID: string;
-    info: Session;
-  };
-};
-
-export type EventMessageUpdated = {
-  id: string;
-  type: "message.updated";
-  properties: {
-    sessionID: string;
-    info: Message;
-  };
-};
-
-export type EventMessageRemoved = {
-  id: string;
-  type: "message.removed";
-  properties: {
-    sessionID: string;
-    messageID: string;
-  };
-};
-
-export type EventMessagePartUpdated = {
-  id: string;
-  type: "message.part.updated";
-  properties: {
-    sessionID: string;
-    part: Part;
-    time: number;
-  };
-};
-
-export type EventMessagePartRemoved = {
-  id: string;
-  type: "message.part.removed";
-  properties: {
-    sessionID: string;
-    messageID: string;
-    partID: string;
-  };
-};
-
-export type EventSessionNextAgentSwitched = {
-  id: string;
-  type: "session.next.agent.switched";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    agent: string;
-  };
-};
-
-export type EventSessionNextModelSwitched = {
-  id: string;
-  type: "session.next.model.switched";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    model: ModelRef;
-  };
-};
-
-export type EventSessionNextMoved = {
-  id: string;
-  type: "session.next.moved";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    location: LocationRef;
-    subdirectory?: string;
-  };
-};
-
-export type EventSessionNextPrompted = {
-  id: string;
-  type: "session.next.prompted";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    prompt: Prompt;
-    delivery: "steer" | "queue";
-  };
-};
-
-export type EventSessionNextPromptAdmitted = {
-  id: string;
-  type: "session.next.prompt.admitted";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    prompt: Prompt;
-    delivery: "steer" | "queue";
-  };
-};
-
-export type EventSessionNextContextUpdated = {
-  id: string;
-  type: "session.next.context.updated";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    text: string;
-  };
-};
-
-export type EventSessionNextSynthetic = {
-  id: string;
-  type: "session.next.synthetic";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    text: string;
-  };
-};
-
-export type EventSessionNextShellStarted = {
-  id: string;
-  type: "session.next.shell.started";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    callID: string;
-    command: string;
-  };
-};
-
-export type EventSessionNextShellEnded = {
-  id: string;
-  type: "session.next.shell.ended";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    callID: string;
-    output: string;
-  };
-};
-
-export type EventSessionNextStepStarted = {
-  id: string;
-  type: "session.next.step.started";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    agent: string;
-    model: ModelRef;
-    snapshot?: string;
-  };
-};
-
-export type EventSessionNextStepEnded = {
-  id: string;
-  type: "session.next.step.ended";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    finish: string;
-    cost: number;
-    tokens: {
-      input: number;
-      output: number;
-      reasoning: number;
-      cache: {
-        read: number;
-        write: number;
-      };
-    };
-    snapshot?: string;
-    files?: Array<string>;
-  };
-};
-
-export type EventSessionNextStepFailed = {
-  id: string;
-  type: "session.next.step.failed";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    error: SessionErrorUnknown;
-  };
-};
-
-export type EventSessionNextTextStarted = {
-  id: string;
-  type: "session.next.text.started";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    textID: string;
-  };
-};
-
-export type EventSessionNextTextDelta = {
-  id: string;
-  type: "session.next.text.delta";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    textID: string;
-    delta: string;
-  };
-};
-
-export type EventSessionNextTextEnded = {
-  id: string;
-  type: "session.next.text.ended";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    textID: string;
-    text: string;
-  };
-};
-
-export type EventSessionNextReasoningStarted = {
-  id: string;
-  type: "session.next.reasoning.started";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    reasoningID: string;
-    providerMetadata?: LLMProviderMetadata;
-  };
-};
-
-export type EventSessionNextReasoningDelta = {
-  id: string;
-  type: "session.next.reasoning.delta";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    reasoningID: string;
-    delta: string;
-  };
-};
-
-export type EventSessionNextReasoningEnded = {
-  id: string;
-  type: "session.next.reasoning.ended";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    reasoningID: string;
-    text: string;
-    providerMetadata?: LLMProviderMetadata;
-  };
-};
-
-export type EventSessionNextToolInputStarted = {
-  id: string;
-  type: "session.next.tool.input.started";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    name: string;
-  };
-};
-
-export type EventSessionNextToolInputDelta = {
-  id: string;
-  type: "session.next.tool.input.delta";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    delta: string;
-  };
-};
-
-export type EventSessionNextToolInputEnded = {
-  id: string;
-  type: "session.next.tool.input.ended";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    text: string;
-  };
-};
-
-export type EventSessionNextToolCalled = {
-  id: string;
-  type: "session.next.tool.called";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    tool: string;
-    input: Record<string, unknown>;
-    provider: {
-      executed: boolean;
-      metadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type EventSessionNextToolProgress = {
-  id: string;
-  type: "session.next.tool.progress";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    structured: Record<string, unknown>;
-    content: Array<LLMToolContent>;
-  };
-};
-
-export type EventSessionNextToolSuccess = {
-  id: string;
-  type: "session.next.tool.success";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    structured: Record<string, unknown>;
-    content: Array<LLMToolContent>;
-    outputPaths?: Array<string>;
-    result?: unknown;
-    provider: {
-      executed: boolean;
-      metadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type EventSessionNextToolFailed = {
-  id: string;
-  type: "session.next.tool.failed";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    assistantMessageID: string;
-    callID: string;
-    error: SessionErrorUnknown;
-    result?: unknown;
-    provider: {
-      executed: boolean;
-      metadata?: LLMProviderMetadata;
-    };
-  };
-};
-
-export type EventSessionNextRetried = {
-  id: string;
-  type: "session.next.retried";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    attempt: number;
-    error: SessionNextRetry_error;
-  };
-};
-
-export type EventSessionNextCompactionStarted = {
-  id: string;
-  type: "session.next.compaction.started";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    reason: "auto" | "manual";
-  };
-};
-
-export type EventSessionNextCompactionDelta = {
-  id: string;
-  type: "session.next.compaction.delta";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    text: string;
-  };
-};
-
-export type EventSessionNextCompactionEnded = {
-  id: string;
-  type: "session.next.compaction.ended";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-    reason: "auto" | "manual";
-    text: string;
-    recent: string;
-  };
-};
-
-export type EventSessionNextRevertStaged = {
-  id: string;
-  type: "session.next.revert.staged";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    revert: RevertState;
-  };
-};
-
-export type EventSessionNextRevertCleared = {
-  id: string;
-  type: "session.next.revert.cleared";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-  };
-};
-
-export type EventSessionNextRevertCommitted = {
-  id: string;
-  type: "session.next.revert.committed";
-  properties: {
-    timestamp: number;
-    sessionID: string;
-    messageID: string;
-  };
-};
-
-export type EventMessagePartDelta = {
-  id: string;
-  type: "message.part.delta";
-  properties: {
-    sessionID: string;
-    messageID: string;
-    partID: string;
-    field: string;
-    delta: string;
-  };
-};
-
-export type EventSessionDiff = {
-  id: string;
-  type: "session.diff";
-  properties: {
-    sessionID: string;
-    diff: Array<SnapshotFileDiff>;
-  };
-};
-
-export type EventSessionError = {
-  id: string;
-  type: "session.error";
-  properties: {
-    sessionID?: string;
-    error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | StructuredOutputError | ContextOverflowError | ContentFilterError | APIError;
-  };
-};
-
-export type EventInstallationUpdated = {
-  id: string;
-  type: "installation.updated";
-  properties: {
-    version: string;
-  };
-};
-
-export type EventInstallationUpdate_available = {
-  id: string;
-  type: "installation.update-available";
-  properties: {
-    version: string;
-  };
-};
-
-export type EventFileEdited = {
-  id: string;
-  type: "file.edited";
-  properties: {
-    file: string;
-  };
-};
-
-export type EventReferenceUpdated = {
-  id: string;
-  type: "reference.updated";
-  properties: Record<string, unknown>;
-};
-
-export type EventPermissionV2Asked = {
-  id: string;
-  type: "permission.v2.asked";
-  properties: {
-    id: string;
-    sessionID: string;
-    action: string;
-    resources: Array<string>;
-    save?: Array<string>;
-    metadata?: Record<string, unknown>;
-    source?: PermissionV2Source;
-  };
-};
-
-export type EventPermissionV2Replied = {
-  id: string;
-  type: "permission.v2.replied";
-  properties: {
-    sessionID: string;
-    requestID: string;
-    reply: PermissionV2Reply;
-  };
-};
-
-export type EventPluginAdded = {
-  id: string;
-  type: "plugin.added";
-  properties: {
-    id: string;
-  };
-};
-
-export type EventProjectDirectoriesUpdated = {
-  id: string;
-  type: "project.directories.updated";
-  properties: {
-    projectID: string;
-  };
-};
-
-export type EventFileWatcherUpdated = {
-  id: string;
-  type: "file.watcher.updated";
-  properties: {
-    file: string;
-    event: "add" | "change" | "unlink";
-  };
-};
-
-export type EventPtyCreated = {
-  id: string;
-  type: "pty.created";
-  properties: {
-    info: Pty;
-  };
-};
-
-export type EventPtyUpdated = {
-  id: string;
-  type: "pty.updated";
-  properties: {
-    info: Pty;
-  };
-};
-
-export type EventPtyExited = {
-  id: string;
-  type: "pty.exited";
-  properties: {
-    id: string;
-    exitCode: number;
-  };
-};
-
-export type EventPtyDeleted = {
-  id: string;
-  type: "pty.deleted";
-  properties: {
-    id: string;
-  };
-};
-
-export type EventQuestionV2Asked = {
-  id: string;
-  type: "question.v2.asked";
-  properties: {
-    id: string;
-    sessionID: string;
-    /** Questions to ask */
-    questions: Array<QuestionV2Info>;
-    tool?: QuestionV2Tool;
-  };
-};
-
-export type EventQuestionV2Replied = {
-  id: string;
-  type: "question.v2.replied";
-  properties: {
-    sessionID: string;
-    requestID: string;
-    answers: Array<QuestionV2Answer>;
-  };
-};
-
-export type EventQuestionV2Rejected = {
-  id: string;
-  type: "question.v2.rejected";
-  properties: {
-    sessionID: string;
-    requestID: string;
-  };
-};
-
-export type EventTodoUpdated = {
-  id: string;
-  type: "todo.updated";
-  properties: {
-    sessionID: string;
-    todos: Array<Todo>;
-  };
-};
-
-export type EventLspUpdated = {
-  id: string;
-  type: "lsp.updated";
-  properties: Record<string, unknown>;
-};
-
-export type EventPermissionAsked = {
-  id: string;
-  type: "permission.asked";
-  properties: {
-    id: string;
-    sessionID: string;
-    permission: string;
-    patterns: Array<string>;
-    metadata: Record<string, unknown>;
-    always: Array<string>;
-    tool?: {
-      messageID: string;
-      callID: string;
-    };
-  };
-};
-
-export type EventPermissionReplied = {
-  id: string;
-  type: "permission.replied";
-  properties: {
-    sessionID: string;
-    requestID: string;
-    reply: "once" | "always" | "reject";
-  };
-};
-
-export type EventMcpToolsChanged = {
-  id: string;
-  type: "mcp.tools.changed";
-  properties: {
-    server: string;
-  };
-};
-
-export type EventMcpBrowserOpenFailed = {
-  id: string;
-  type: "mcp.browser.open.failed";
-  properties: {
-    mcpName: string;
-    url: string;
-  };
-};
-
-export type EventCommandExecuted = {
-  id: string;
-  type: "command.executed";
-  properties: {
-    name: string;
-    sessionID: string;
-    arguments: string;
-    messageID: string;
-  };
-};
-
-export type EventProjectUpdated = {
-  id: string;
-  type: "project.updated";
-  properties: {
-    id: string;
-    worktree: string;
-    vcs?: ProjectVcs;
-    name?: string;
-    icon?: ProjectIcon;
-    commands?: ProjectCommands;
-    time: ProjectTime;
-    sandboxes: Array<string>;
-  };
-};
-
-export type EventSessionStatus = {
-  id: string;
-  type: "session.status";
-  properties: {
-    sessionID: string;
-    status: SessionStatus;
-  };
-};
-
-export type EventSessionIdle = {
-  id: string;
-  type: "session.idle";
-  properties: {
-    sessionID: string;
-  };
-};
-
-export type EventQuestionAsked = {
-  id: string;
-  type: "question.asked";
-  properties: {
-    id: string;
-    sessionID: string;
-    /** Questions to ask */
-    questions: Array<QuestionInfo>;
-    tool?: QuestionTool;
-  };
-};
-
-export type EventQuestionReplied = {
-  id: string;
-  type: "question.replied";
-  properties: {
-    sessionID: string;
-    requestID: string;
-    answers: Array<QuestionAnswer>;
-  };
-};
-
-export type EventQuestionRejected = {
-  id: string;
-  type: "question.rejected";
-  properties: {
-    sessionID: string;
-    requestID: string;
-  };
-};
-
-export type EventSessionCompacted = {
-  id: string;
-  type: "session.compacted";
-  properties: {
-    sessionID: string;
-  };
-};
-
-export type EventVcsBranchUpdated = {
-  id: string;
-  type: "vcs.branch.updated";
-  properties: {
-    branch?: string;
-  };
-};
-
-export type EventWorkspaceReady = {
-  id: string;
-  type: "workspace.ready";
-  properties: {
-    name: string;
-  };
-};
-
-export type EventWorkspaceFailed = {
-  id: string;
-  type: "workspace.failed";
-  properties: {
-    message: string;
-  };
-};
-
-export type EventWorkspaceStatus = {
-  id: string;
-  type: "workspace.status";
-  properties: {
-    workspaceID: string;
-    status: "connected" | "connecting" | "disconnected" | "error";
-  };
-};
-
-export type EventWorktreeReady = {
-  id: string;
-  type: "worktree.ready";
-  properties: {
-    name: string;
-    branch?: string;
-  };
-};
-
-export type EventWorktreeFailed = {
-  id: string;
-  type: "worktree.failed";
-  properties: {
-    message: string;
-  };
-};
-
-export type EventServerConnected = {
-  id: string;
-  type: "server.connected";
-  properties: Record<string, unknown>;
-};
-
-export type EventGlobalDisposed = {
-  id: string;
-  type: "global.disposed";
-  properties: Record<string, unknown>;
-};
-
-export type CredentialOAuth = {
-  type: "oauth";
-  methodID: string;
-  refresh: string;
-  access: string;
-  expires: number;
-  metadata?: Record<string, unknown>;
-};
-
-export type CredentialKey = {
-  type: "key";
-  key: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type SkillV2DirectorySource = {
-  type: "directory";
-  path: string;
-};
-
-export type SkillV2UrlSource = {
-  type: "url";
-  url: string;
-};
-
-export type SkillV2EmbeddedSource = {
-  type: "embedded";
-  skill: SkillV2Info;
-};
-
-export type BadRequestError = {
-  name: "BadRequest";
-  data: {
-    message: string;
-    kind?: "Params" | "Headers" | "Query" | "Body" | "Payload";
+    projectID: Project_ID;
   };
 };
 
@@ -6082,194 +4333,176 @@ export type BadRequestError = {
  * hold for long, because upstream flipping it fails CI's `git diff`.
  */
 export const OPENCODE_OPERATIONS = {
-  "app.agents": { method: "GET", path: "/agent", sse: false },
-  "app.log": { method: "POST", path: "/log", sse: false },
-  "app.skills": { method: "GET", path: "/skill", sse: false },
-  "auth.remove": { method: "DELETE", path: "/auth/{providerID}", sse: false },
-  "auth.set": { method: "PUT", path: "/auth/{providerID}", sse: false },
-  "command.list": { method: "GET", path: "/command", sse: false },
-  "config.get": { method: "GET", path: "/config", sse: false },
-  "config.providers": { method: "GET", path: "/config/providers", sse: false },
-  "config.update": { method: "PATCH", path: "/config", sse: false },
-  "event.subscribe": { method: "GET", path: "/event", sse: true },
-  "experimental.capabilities.get": { method: "GET", path: "/experimental/capabilities", sse: false },
-  "experimental.console.get": { method: "GET", path: "/experimental/console", sse: false },
-  "experimental.console.listOrgs": { method: "GET", path: "/experimental/console/orgs", sse: false },
-  "experimental.console.switchOrg": { method: "POST", path: "/experimental/console/switch", sse: false },
-  "experimental.controlPlane.moveSession": { method: "POST", path: "/experimental/control-plane/move-session", sse: false },
-  "experimental.projectCopy.generateName": { method: "POST", path: "/experimental/project/{projectID}/copy/generate-name", sse: false },
-  "experimental.resource.list": { method: "GET", path: "/experimental/resource", sse: false },
-  "experimental.session.background": { method: "POST", path: "/experimental/session/{sessionID}/background", sse: false },
-  "experimental.session.list": { method: "GET", path: "/experimental/session", sse: false },
-  "experimental.workspace.adapter.list": { method: "GET", path: "/experimental/workspace/adapter", sse: false },
-  "experimental.workspace.create": { method: "POST", path: "/experimental/workspace", sse: false },
-  "experimental.workspace.list": { method: "GET", path: "/experimental/workspace", sse: false },
-  "experimental.workspace.remove": { method: "DELETE", path: "/experimental/workspace/{id}", sse: false },
-  "experimental.workspace.status": { method: "GET", path: "/experimental/workspace/status", sse: false },
-  "experimental.workspace.syncList": { method: "POST", path: "/experimental/workspace/sync-list", sse: false },
-  "experimental.workspace.warp": { method: "POST", path: "/experimental/workspace/warp", sse: false },
-  "file.list": { method: "GET", path: "/file", sse: false },
-  "file.read": { method: "GET", path: "/file/content", sse: false },
-  "file.status": { method: "GET", path: "/file/status", sse: false },
-  "find.files": { method: "GET", path: "/find/file", sse: false },
-  "find.symbols": { method: "GET", path: "/find/symbol", sse: false },
-  "find.text": { method: "GET", path: "/find", sse: false },
-  "formatter.status": { method: "GET", path: "/formatter", sse: false },
-  "global.config.get": { method: "GET", path: "/global/config", sse: false },
-  "global.config.update": { method: "PATCH", path: "/global/config", sse: false },
-  "global.dispose": { method: "POST", path: "/global/dispose", sse: false },
-  "global.event": { method: "GET", path: "/global/event", sse: true },
-  "global.health": { method: "GET", path: "/global/health", sse: false },
-  "global.upgrade": { method: "POST", path: "/global/upgrade", sse: false },
-  "instance.dispose": { method: "POST", path: "/instance/dispose", sse: false },
-  "lsp.status": { method: "GET", path: "/lsp", sse: false },
-  "mcp.add": { method: "POST", path: "/mcp", sse: false },
-  "mcp.auth.authenticate": { method: "POST", path: "/mcp/{name}/auth/authenticate", sse: false },
-  "mcp.auth.callback": { method: "POST", path: "/mcp/{name}/auth/callback", sse: false },
-  "mcp.auth.remove": { method: "DELETE", path: "/mcp/{name}/auth", sse: false },
-  "mcp.auth.start": { method: "POST", path: "/mcp/{name}/auth", sse: false },
-  "mcp.connect": { method: "POST", path: "/mcp/{name}/connect", sse: false },
-  "mcp.disconnect": { method: "POST", path: "/mcp/{name}/disconnect", sse: false },
-  "mcp.status": { method: "GET", path: "/mcp", sse: false },
-  "part.delete": { method: "DELETE", path: "/session/{sessionID}/message/{messageID}/part/{partID}", sse: false },
-  "part.update": { method: "PATCH", path: "/session/{sessionID}/message/{messageID}/part/{partID}", sse: false },
-  "path.get": { method: "GET", path: "/path", sse: false },
-  "permission.list": { method: "GET", path: "/permission", sse: false },
-  "permission.reply": { method: "POST", path: "/permission/{requestID}/reply", sse: false },
-  "permission.respond": { method: "POST", path: "/session/{sessionID}/permissions/{permissionID}", sse: false },
-  "project.current": { method: "GET", path: "/project/current", sse: false },
-  "project.directories": { method: "GET", path: "/project/{projectID}/directories", sse: false },
-  "project.initGit": { method: "POST", path: "/project/git/init", sse: false },
-  "project.list": { method: "GET", path: "/project", sse: false },
-  "project.update": { method: "PATCH", path: "/project/{projectID}", sse: false },
-  "provider.auth": { method: "GET", path: "/provider/auth", sse: false },
-  "provider.list": { method: "GET", path: "/provider", sse: false },
-  "provider.oauth.authorize": { method: "POST", path: "/provider/{providerID}/oauth/authorize", sse: false },
-  "provider.oauth.callback": { method: "POST", path: "/provider/{providerID}/oauth/callback", sse: false },
-  "pty.connect": { method: "GET", path: "/pty/{ptyID}/connect", sse: false },
-  "pty.connectToken": { method: "POST", path: "/pty/{ptyID}/connect-token", sse: false },
-  "pty.create": { method: "POST", path: "/pty", sse: false },
-  "pty.get": { method: "GET", path: "/pty/{ptyID}", sse: false },
-  "pty.list": { method: "GET", path: "/pty", sse: false },
-  "pty.remove": { method: "DELETE", path: "/pty/{ptyID}", sse: false },
-  "pty.shells": { method: "GET", path: "/pty/shells", sse: false },
-  "pty.update": { method: "PUT", path: "/pty/{ptyID}", sse: false },
-  "question.list": { method: "GET", path: "/question", sse: false },
-  "question.reject": { method: "POST", path: "/question/{requestID}/reject", sse: false },
-  "question.reply": { method: "POST", path: "/question/{requestID}/reply", sse: false },
-  "session.abort": { method: "POST", path: "/session/{sessionID}/abort", sse: false },
-  "session.children": { method: "GET", path: "/session/{sessionID}/children", sse: false },
-  "session.command": { method: "POST", path: "/session/{sessionID}/command", sse: false },
-  "session.create": { method: "POST", path: "/session", sse: false },
-  "session.delete": { method: "DELETE", path: "/session/{sessionID}", sse: false },
-  "session.deleteMessage": { method: "DELETE", path: "/session/{sessionID}/message/{messageID}", sse: false },
-  "session.diff": { method: "GET", path: "/session/{sessionID}/diff", sse: false },
-  "session.fork": { method: "POST", path: "/session/{sessionID}/fork", sse: false },
-  "session.get": { method: "GET", path: "/session/{sessionID}", sse: false },
-  "session.init": { method: "POST", path: "/session/{sessionID}/init", sse: false },
-  "session.list": { method: "GET", path: "/session", sse: false },
-  "session.message": { method: "GET", path: "/session/{sessionID}/message/{messageID}", sse: false },
-  "session.messages": { method: "GET", path: "/session/{sessionID}/message", sse: false },
-  "session.prompt": { method: "POST", path: "/session/{sessionID}/message", sse: false },
-  "session.prompt_async": { method: "POST", path: "/session/{sessionID}/prompt_async", sse: false },
-  "session.revert": { method: "POST", path: "/session/{sessionID}/revert", sse: false },
-  "session.share": { method: "POST", path: "/session/{sessionID}/share", sse: false },
-  "session.shell": { method: "POST", path: "/session/{sessionID}/shell", sse: false },
-  "session.status": { method: "GET", path: "/session/status", sse: false },
-  "session.summarize": { method: "POST", path: "/session/{sessionID}/summarize", sse: false },
-  "session.todo": { method: "GET", path: "/session/{sessionID}/todo", sse: false },
-  "session.unrevert": { method: "POST", path: "/session/{sessionID}/unrevert", sse: false },
-  "session.unshare": { method: "DELETE", path: "/session/{sessionID}/share", sse: false },
-  "session.update": { method: "PATCH", path: "/session/{sessionID}", sse: false },
-  "sync.history.list": { method: "POST", path: "/sync/history", sse: false },
-  "sync.replay": { method: "POST", path: "/sync/replay", sse: false },
-  "sync.start": { method: "POST", path: "/sync/start", sse: false },
-  "sync.steal": { method: "POST", path: "/sync/steal", sse: false },
-  "tool.ids": { method: "GET", path: "/experimental/tool/ids", sse: false },
-  "tool.list": { method: "GET", path: "/experimental/tool", sse: false },
-  "tui.appendPrompt": { method: "POST", path: "/tui/append-prompt", sse: false },
-  "tui.clearPrompt": { method: "POST", path: "/tui/clear-prompt", sse: false },
-  "tui.control.next": { method: "GET", path: "/tui/control/next", sse: false },
-  "tui.control.response": { method: "POST", path: "/tui/control/response", sse: false },
-  "tui.executeCommand": { method: "POST", path: "/tui/execute-command", sse: false },
-  "tui.openHelp": { method: "POST", path: "/tui/open-help", sse: false },
-  "tui.openModels": { method: "POST", path: "/tui/open-models", sse: false },
-  "tui.openSessions": { method: "POST", path: "/tui/open-sessions", sse: false },
-  "tui.openThemes": { method: "POST", path: "/tui/open-themes", sse: false },
-  "tui.publish": { method: "POST", path: "/tui/publish", sse: false },
-  "tui.selectSession": { method: "POST", path: "/tui/select-session", sse: false },
-  "tui.showToast": { method: "POST", path: "/tui/show-toast", sse: false },
-  "tui.submitPrompt": { method: "POST", path: "/tui/submit-prompt", sse: false },
-  "v2.agent.list": { method: "GET", path: "/api/agent", sse: false },
-  "v2.command.list": { method: "GET", path: "/api/command", sse: false },
-  "v2.credential.remove": { method: "DELETE", path: "/api/credential/{credentialID}", sse: false },
-  "v2.credential.update": { method: "PATCH", path: "/api/credential/{credentialID}", sse: false },
-  "v2.event.subscribe": { method: "GET", path: "/api/event", sse: true },
-  "v2.fs.find": { method: "GET", path: "/api/fs/find", sse: false },
-  "v2.fs.list": { method: "GET", path: "/api/fs/list", sse: false },
-  "v2.fs.read": { method: "GET", path: "/api/fs/read/*", sse: false },
-  "v2.health.get": { method: "GET", path: "/api/health", sse: false },
-  "v2.integration.attempt.cancel": { method: "DELETE", path: "/api/integration/attempt/{attemptID}", sse: false },
-  "v2.integration.attempt.complete": { method: "POST", path: "/api/integration/attempt/{attemptID}/complete", sse: false },
-  "v2.integration.attempt.status": { method: "GET", path: "/api/integration/attempt/{attemptID}", sse: false },
-  "v2.integration.connect.key": { method: "POST", path: "/api/integration/{integrationID}/connect/key", sse: false },
-  "v2.integration.connect.oauth": { method: "POST", path: "/api/integration/{integrationID}/connect/oauth", sse: false },
-  "v2.integration.get": { method: "GET", path: "/api/integration/{integrationID}", sse: false },
-  "v2.integration.list": { method: "GET", path: "/api/integration", sse: false },
-  "v2.location.get": { method: "GET", path: "/api/location", sse: false },
-  "v2.model.list": { method: "GET", path: "/api/model", sse: false },
-  "v2.permission.request.list": { method: "GET", path: "/api/permission/request", sse: false },
-  "v2.permission.saved.list": { method: "GET", path: "/api/permission/saved", sse: false },
-  "v2.permission.saved.remove": { method: "DELETE", path: "/api/permission/saved/{id}", sse: false },
-  "v2.projectCopy.create": { method: "POST", path: "/experimental/project/{projectID}/copy", sse: false },
-  "v2.projectCopy.refresh": { method: "POST", path: "/experimental/project/{projectID}/copy/refresh", sse: false },
-  "v2.projectCopy.remove": { method: "DELETE", path: "/experimental/project/{projectID}/copy", sse: false },
-  "v2.provider.get": { method: "GET", path: "/api/provider/{providerID}", sse: false },
-  "v2.provider.list": { method: "GET", path: "/api/provider", sse: false },
-  "v2.pty.connect": { method: "GET", path: "/api/pty/{ptyID}/connect", sse: false },
-  "v2.pty.connectToken": { method: "POST", path: "/api/pty/{ptyID}/connect-token", sse: false },
-  "v2.pty.create": { method: "POST", path: "/api/pty", sse: false },
-  "v2.pty.get": { method: "GET", path: "/api/pty/{ptyID}", sse: false },
-  "v2.pty.list": { method: "GET", path: "/api/pty", sse: false },
-  "v2.pty.remove": { method: "DELETE", path: "/api/pty/{ptyID}", sse: false },
-  "v2.pty.update": { method: "PUT", path: "/api/pty/{ptyID}", sse: false },
-  "v2.question.request.list": { method: "GET", path: "/api/question/request", sse: false },
-  "v2.reference.list": { method: "GET", path: "/api/reference", sse: false },
-  "v2.session.active": { method: "GET", path: "/api/session/active", sse: false },
-  "v2.session.compact": { method: "POST", path: "/api/session/{sessionID}/compact", sse: false },
-  "v2.session.context": { method: "GET", path: "/api/session/{sessionID}/context", sse: false },
-  "v2.session.create": { method: "POST", path: "/api/session", sse: false },
-  "v2.session.events": { method: "GET", path: "/api/session/{sessionID}/event", sse: true },
-  "v2.session.get": { method: "GET", path: "/api/session/{sessionID}", sse: false },
-  "v2.session.history": { method: "GET", path: "/api/session/{sessionID}/history", sse: false },
-  "v2.session.interrupt": { method: "POST", path: "/api/session/{sessionID}/interrupt", sse: false },
-  "v2.session.list": { method: "GET", path: "/api/session", sse: false },
-  "v2.session.message": { method: "GET", path: "/api/session/{sessionID}/message/{messageID}", sse: false },
-  "v2.session.messages": { method: "GET", path: "/api/session/{sessionID}/message", sse: false },
-  "v2.session.permission.create": { method: "POST", path: "/api/session/{sessionID}/permission", sse: false },
-  "v2.session.permission.get": { method: "GET", path: "/api/session/{sessionID}/permission/{requestID}", sse: false },
-  "v2.session.permission.list": { method: "GET", path: "/api/session/{sessionID}/permission", sse: false },
-  "v2.session.permission.reply": { method: "POST", path: "/api/session/{sessionID}/permission/{requestID}/reply", sse: false },
-  "v2.session.prompt": { method: "POST", path: "/api/session/{sessionID}/prompt", sse: false },
-  "v2.session.question.list": { method: "GET", path: "/api/session/{sessionID}/question", sse: false },
-  "v2.session.question.reject": { method: "POST", path: "/api/session/{sessionID}/question/{requestID}/reject", sse: false },
-  "v2.session.question.reply": { method: "POST", path: "/api/session/{sessionID}/question/{requestID}/reply", sse: false },
-  "v2.session.revert.clear": { method: "POST", path: "/api/session/{sessionID}/revert/clear", sse: false },
-  "v2.session.revert.commit": { method: "POST", path: "/api/session/{sessionID}/revert/commit", sse: false },
-  "v2.session.revert.stage": { method: "POST", path: "/api/session/{sessionID}/revert/stage", sse: false },
-  "v2.session.switchAgent": { method: "POST", path: "/api/session/{sessionID}/agent", sse: false },
-  "v2.session.switchModel": { method: "POST", path: "/api/session/{sessionID}/model", sse: false },
-  "v2.session.wait": { method: "POST", path: "/api/session/{sessionID}/wait", sse: false },
-  "v2.skill.list": { method: "GET", path: "/api/skill", sse: false },
-  "vcs.apply": { method: "POST", path: "/vcs/apply", sse: false },
-  "vcs.diff": { method: "GET", path: "/vcs/diff", sse: false },
-  "vcs.diff.raw": { method: "GET", path: "/vcs/diff/raw", sse: false },
-  "vcs.get": { method: "GET", path: "/vcs", sse: false },
-  "vcs.status": { method: "GET", path: "/vcs/status", sse: false },
-  "worktree.create": { method: "POST", path: "/experimental/worktree", sse: false },
-  "worktree.list": { method: "GET", path: "/experimental/worktree", sse: false },
-  "worktree.remove": { method: "DELETE", path: "/experimental/worktree", sse: false },
-  "worktree.reset": { method: "POST", path: "/experimental/worktree/reset", sse: false },
+  "agent.get": { method: "GET", path: "/api/agent/{agentID}", sse: false },
+  "agent.list": { method: "GET", path: "/api/agent", sse: false },
+  "command.list": { method: "GET", path: "/api/command", sse: false },
+  "config.get": { method: "GET", path: "/api/config", sse: false },
+  "config.shells": { method: "GET", path: "/api/config/shell", sse: false },
+  "credential.activate": { method: "POST", path: "/api/credential/{credentialID}/activate", sse: false },
+  "credential.create": { method: "POST", path: "/api/credential", sse: false },
+  "credential.list": { method: "GET", path: "/api/credential", sse: false },
+  "credential.remove": { method: "DELETE", path: "/api/credential/{credentialID}", sse: false },
+  "credential.update": { method: "PATCH", path: "/api/credential/{credentialID}", sse: false },
+  "debug.heapDump": { method: "POST", path: "/api/debug/heap-dump", sse: false },
+  "debug.location.evict": { method: "DELETE", path: "/api/debug/location", sse: false },
+  "debug.location.list": { method: "GET", path: "/api/debug/location", sse: false },
+  "event.subscribe": { method: "GET", path: "/api/event", sse: true },
+  "experimental.artifacts.create": { method: "POST", path: "/api/experimental/artifacts", sse: false },
+  "experimental.artifacts.delete": { method: "DELETE", path: "/api/experimental/artifacts/{artifactID}", sse: false },
+  "experimental.artifacts.get": { method: "GET", path: "/api/experimental/artifacts/{artifactID}", sse: false },
+  "experimental.artifacts.list": { method: "GET", path: "/api/experimental/artifacts", sse: false },
+  "experimental.artifacts.providers": { method: "GET", path: "/api/experimental/artifacts/providers", sse: false },
+  "experimental.artifacts.update": { method: "PATCH", path: "/api/experimental/artifacts/{artifactID}", sse: false },
+  "experimental.artifacts.view": { method: "GET", path: "/api/experimental/artifacts/{artifactID}/view/*", sse: false },
+  "experimental.config.update": { method: "PATCH", path: "/api/experimental/config", sse: false },
+  "experimental.fs.unwatch": { method: "DELETE", path: "/api/experimental/fs/watch", sse: false },
+  "experimental.fs.watch": { method: "POST", path: "/api/experimental/fs/watch", sse: false },
+  "experimental.fs.write": { method: "POST", path: "/api/experimental/fs/write", sse: false },
+  "experimental.generate.decisions": { method: "POST", path: "/api/experimental/generate/decisions", sse: false },
+  "experimental.generate.image": { method: "POST", path: "/api/experimental/generate/image", sse: false },
+  "experimental.generate.text": { method: "POST", path: "/api/experimental/generate/text", sse: false },
+  "experimental.generate.textLegacy": { method: "POST", path: "/api/experimental/generate", sse: false },
+  "experimental.integration.wellknown.add": { method: "POST", path: "/api/experimental/integration/wellknown", sse: false },
+  "experimental.job.list": { method: "GET", path: "/api/experimental/job", sse: false },
+  "experimental.mcp.add": { method: "PUT", path: "/api/experimental/mcp/{server}", sse: false },
+  "experimental.mcp.client": { method: "GET", path: "/api/experimental/client-mcp", sse: false },
+  "experimental.mcp.client.token": { method: "POST", path: "/api/experimental/client-mcp/token", sse: false },
+  "experimental.mcp.connect": { method: "POST", path: "/api/experimental/mcp/{server}/connect", sse: false },
+  "experimental.mcp.disconnect": { method: "POST", path: "/api/experimental/mcp/{server}/disconnect", sse: false },
+  "experimental.mcp.remove": { method: "DELETE", path: "/api/experimental/mcp/{server}", sse: false },
+  "experimental.media.get": { method: "GET", path: "/api/experimental/media/{hash}", sse: false },
+  "experimental.migration.v1.status": { method: "GET", path: "/api/experimental/migration/v1", sse: false },
+  "experimental.persistentPty.connect": { method: "GET", path: "/api/experimental/persistent-pty/{ptyID}/connect", sse: false },
+  "experimental.persistentPty.connectToken": { method: "POST", path: "/api/experimental/persistent-pty/{ptyID}/connect-token", sse: false },
+  "experimental.persistentPty.create": { method: "POST", path: "/api/experimental/session/{sessionID}/terminal", sse: false },
+  "experimental.persistentPty.get": { method: "GET", path: "/api/experimental/persistent-pty/{ptyID}", sse: false },
+  "experimental.persistentPty.handoff": { method: "POST", path: "/api/experimental/persistent-pty/handoff", sse: false },
+  "experimental.persistentPty.list": { method: "GET", path: "/api/experimental/session/{sessionID}/terminal", sse: false },
+  "experimental.persistentPty.read": { method: "GET", path: "/api/experimental/session/{sessionID}/terminal/read", sse: false },
+  "experimental.persistentPty.remove": { method: "DELETE", path: "/api/experimental/persistent-pty/{ptyID}", sse: false },
+  "experimental.persistentPty.shutdown": { method: "POST", path: "/api/experimental/persistent-pty/shutdown", sse: false },
+  "experimental.persistentPty.snapshot": { method: "GET", path: "/api/experimental/persistent-pty/{ptyID}/snapshot", sse: false },
+  "experimental.persistentPty.update": { method: "PUT", path: "/api/experimental/persistent-pty/{ptyID}", sse: false },
+  "experimental.schedule.create": { method: "POST", path: "/api/experimental/schedule", sse: false },
+  "experimental.schedule.delete": { method: "DELETE", path: "/api/experimental/schedule/{scheduleID}", sse: false },
+  "experimental.schedule.get": { method: "GET", path: "/api/experimental/schedule/{scheduleID}", sse: false },
+  "experimental.schedule.list": { method: "GET", path: "/api/experimental/schedule", sse: false },
+  "experimental.schedule.pause": { method: "POST", path: "/api/experimental/schedule/{scheduleID}/pause", sse: false },
+  "experimental.schedule.resume": { method: "POST", path: "/api/experimental/schedule/{scheduleID}/resume", sse: false },
+  "experimental.session.export": { method: "GET", path: "/api/experimental/session/{sessionID}/export", sse: false },
+  "experimental.session.import": { method: "POST", path: "/api/experimental/session/import", sse: false },
+  "experimental.session.instructions.entry.list": { method: "GET", path: "/api/experimental/session/{sessionID}/instructions/entries", sse: false },
+  "experimental.session.instructions.entry.put": { method: "PUT", path: "/api/experimental/session/{sessionID}/instructions/entries/{key}", sse: false },
+  "experimental.session.instructions.entry.remove": { method: "DELETE", path: "/api/experimental/session/{sessionID}/instructions/entries/{key}", sse: false },
+  "experimental.session.log": { method: "GET", path: "/api/experimental/session/{sessionID}/log", sse: true },
+  "experimental.session.skill": { method: "POST", path: "/api/experimental/session/{sessionID}/skill", sse: false },
+  "experimental.session.stats": { method: "GET", path: "/api/experimental/session/stats", sse: false },
+  "experimental.session.wait": { method: "POST", path: "/api/experimental/session/{sessionID}/wait", sse: false },
+  "experimental.usage.limits": { method: "GET", path: "/api/experimental/usage/limits", sse: false },
+  "experimental.voice.models": { method: "GET", path: "/api/experimental/voice/models", sse: false },
+  "experimental.voice.session": { method: "POST", path: "/api/experimental/voice/session", sse: false },
+  "form.list": { method: "GET", path: "/api/form", sse: false },
+  "fs.find": { method: "GET", path: "/api/fs/find", sse: false },
+  "fs.list": { method: "GET", path: "/api/fs/list", sse: false },
+  "fs.read": { method: "GET", path: "/api/fs/read/*", sse: false },
+  "integration.command.cancel": { method: "DELETE", path: "/api/integration/{integrationID}/connect/command/{attemptID}", sse: false },
+  "integration.command.connect": { method: "POST", path: "/api/integration/{integrationID}/connect/command", sse: false },
+  "integration.command.status": { method: "GET", path: "/api/integration/{integrationID}/connect/command/{attemptID}", sse: false },
+  "integration.connect.external": { method: "POST", path: "/api/integration/{integrationID}/connect/external", sse: false },
+  "integration.connect.key": { method: "POST", path: "/api/integration/{integrationID}/connect/key", sse: false },
+  "integration.get": { method: "GET", path: "/api/integration/{integrationID}", sse: false },
+  "integration.list": { method: "GET", path: "/api/integration", sse: false },
+  "integration.oauth.cancel": { method: "DELETE", path: "/api/integration/{integrationID}/connect/oauth/{attemptID}", sse: false },
+  "integration.oauth.complete": { method: "POST", path: "/api/integration/{integrationID}/connect/oauth/{attemptID}/complete", sse: false },
+  "integration.oauth.connect": { method: "POST", path: "/api/integration/{integrationID}/connect/oauth", sse: false },
+  "integration.oauth.status": { method: "GET", path: "/api/integration/{integrationID}/connect/oauth/{attemptID}", sse: false },
+  "location.get": { method: "GET", path: "/api/location", sse: false },
+  "location.reload": { method: "POST", path: "/api/location/reload", sse: false },
+  "mcp.list": { method: "GET", path: "/api/mcp", sse: false },
+  "mcp.resource.catalog": { method: "GET", path: "/api/mcp/resource", sse: false },
+  "model.default": { method: "GET", path: "/api/model/default", sse: false },
+  "model.list": { method: "GET", path: "/api/model", sse: false },
+  "permission.request.list": { method: "GET", path: "/api/permission/request", sse: false },
+  "permission.saved.list": { method: "GET", path: "/api/permission/saved", sse: false },
+  "permission.saved.remove": { method: "DELETE", path: "/api/permission/saved/{id}", sse: false },
+  "permission.saved.update": { method: "PATCH", path: "/api/permission/saved/{id}", sse: false },
+  "plugin.check": { method: "POST", path: "/api/plugin/check", sse: false },
+  "plugin.gui": { method: "GET", path: "/api/plugin/gui", sse: false },
+  "plugin.list": { method: "GET", path: "/api/plugin", sse: false },
+  "plugin.update": { method: "POST", path: "/api/plugin/update", sse: false },
+  "project.list": { method: "GET", path: "/api/project", sse: false },
+  "project.update": { method: "PATCH", path: "/api/project/{projectID}", sse: false },
+  "provider.get": { method: "GET", path: "/api/provider/{providerID}", sse: false },
+  "provider.list": { method: "GET", path: "/api/provider", sse: false },
+  "pty.connect": { method: "GET", path: "/api/pty/{ptyID}/connect", sse: false },
+  "pty.connect.token": { method: "POST", path: "/api/pty/{ptyID}/connect-token", sse: false },
+  "pty.create": { method: "POST", path: "/api/pty", sse: false },
+  "pty.get": { method: "GET", path: "/api/pty/{ptyID}", sse: false },
+  "pty.list": { method: "GET", path: "/api/pty", sse: false },
+  "pty.remove": { method: "DELETE", path: "/api/pty/{ptyID}", sse: false },
+  "pty.update": { method: "PUT", path: "/api/pty/{ptyID}", sse: false },
+  "reference.list": { method: "GET", path: "/api/reference", sse: false },
+  "rpc.call": { method: "POST", path: "/api/rpc/{rpcID}/{method}", sse: false },
+  "server.connect": { method: "GET", path: "/auth/connect/{code}", sse: false },
+  "server.info": { method: "GET", path: "/api/info", sse: false },
+  "server.pair": { method: "POST", path: "/api/pair", sse: false },
+  "session.active": { method: "GET", path: "/api/session/active", sse: false },
+  "session.background": { method: "POST", path: "/api/session/{sessionID}/background", sse: false },
+  "session.command": { method: "POST", path: "/api/session/{sessionID}/command", sse: false },
+  "session.compact": { method: "POST", path: "/api/session/{sessionID}/compact", sse: false },
+  "session.context": { method: "GET", path: "/api/session/{sessionID}/context", sse: false },
+  "session.create": { method: "POST", path: "/api/session", sse: false },
+  "session.diff": { method: "GET", path: "/api/session/{sessionID}/diff", sse: false },
+  "session.environment": { method: "PUT", path: "/api/session/{sessionID}/environment", sse: false },
+  "session.fork": { method: "POST", path: "/api/session/{sessionID}/fork", sse: false },
+  "session.form.cancel": { method: "DELETE", path: "/api/session/{sessionID}/form/{formID}", sse: false },
+  "session.form.create": { method: "POST", path: "/api/session/{sessionID}/form", sse: false },
+  "session.form.get": { method: "GET", path: "/api/session/{sessionID}/form/{formID}", sse: false },
+  "session.form.list": { method: "GET", path: "/api/session/{sessionID}/form", sse: false },
+  "session.form.reply": { method: "POST", path: "/api/session/{sessionID}/form/{formID}/reply", sse: false },
+  "session.generate": { method: "POST", path: "/api/session/{sessionID}/generate", sse: false },
+  "session.get": { method: "GET", path: "/api/session/{sessionID}", sse: false },
+  "session.inbox.cancel": { method: "DELETE", path: "/api/session/{sessionID}/inbox/{inboxID}", sse: false },
+  "session.inbox.list": { method: "GET", path: "/api/session/{sessionID}/inbox", sse: false },
+  "session.inbox.update": { method: "PATCH", path: "/api/session/{sessionID}/inbox/{inboxID}", sse: false },
+  "session.interrupt": { method: "POST", path: "/api/session/{sessionID}/interrupt", sse: false },
+  "session.list": { method: "GET", path: "/api/session", sse: false },
+  "session.message.get": { method: "GET", path: "/api/session/{sessionID}/message/{messageID}", sse: false },
+  "session.message.list": { method: "GET", path: "/api/session/{sessionID}/message", sse: false },
+  "session.move": { method: "POST", path: "/api/session/{sessionID}/move", sse: false },
+  "session.permission.create": { method: "POST", path: "/api/session/{sessionID}/permission", sse: false },
+  "session.permission.get": { method: "GET", path: "/api/session/{sessionID}/permission/{requestID}", sse: false },
+  "session.permission.list": { method: "GET", path: "/api/session/{sessionID}/permission", sse: false },
+  "session.permission.reply": { method: "POST", path: "/api/session/{sessionID}/permission/{requestID}/reply", sse: false },
+  "session.prompt": { method: "POST", path: "/api/session/{sessionID}/prompt", sse: false },
+  "session.remove": { method: "DELETE", path: "/api/session/{sessionID}", sse: false },
+  "session.revert.clear": { method: "DELETE", path: "/api/session/{sessionID}/revert", sse: false },
+  "session.revert.commit": { method: "POST", path: "/api/session/{sessionID}/revert/commit", sse: false },
+  "session.revert.stage": { method: "POST", path: "/api/session/{sessionID}/revert/stage", sse: false },
+  "session.shell": { method: "POST", path: "/api/session/{sessionID}/shell", sse: false },
+  "session.switchAgent": { method: "POST", path: "/api/session/{sessionID}/agent", sse: false },
+  "session.switchModel": { method: "POST", path: "/api/session/{sessionID}/model", sse: false },
+  "session.synthetic": { method: "POST", path: "/api/session/{sessionID}/synthetic", sse: false },
+  "session.update": { method: "PATCH", path: "/api/session/{sessionID}", sse: false },
+  "session.view": { method: "POST", path: "/api/session/{sessionID}/view", sse: false },
+  "shell.create": { method: "POST", path: "/api/shell", sse: false },
+  "shell.get": { method: "GET", path: "/api/shell/{id}", sse: false },
+  "shell.list": { method: "GET", path: "/api/shell", sse: false },
+  "shell.output": { method: "GET", path: "/api/shell/{id}/output", sse: false },
+  "shell.remove": { method: "DELETE", path: "/api/shell/{id}", sse: false },
+  "skill.list": { method: "GET", path: "/api/skill", sse: false },
+  "vcs.base": { method: "GET", path: "/api/vcs/base", sse: false },
+  "vcs.branch.list": { method: "GET", path: "/api/vcs/branch", sse: false },
+  "vcs.diff": { method: "GET", path: "/api/vcs/diff", sse: false },
+  "vcs.get": { method: "GET", path: "/api/vcs", sse: false },
+  "vcs.init": { method: "POST", path: "/api/vcs/init", sse: false },
+  "vcs.status": { method: "GET", path: "/api/vcs/status", sse: false },
+  "websearch.providers": { method: "GET", path: "/api/websearch/provider", sse: false },
+  "websearch.query": { method: "POST", path: "/api/websearch", sse: false },
+  "worktree.create": { method: "POST", path: "/api/worktree", sse: false },
+  "worktree.list": { method: "GET", path: "/api/worktree", sse: false },
+  "worktree.refresh": { method: "POST", path: "/api/worktree/refresh", sse: false },
+  "worktree.remove": { method: "DELETE", path: "/api/worktree", sse: false },
 } as const;
 
 /** Operation ids present in the pinned document. */

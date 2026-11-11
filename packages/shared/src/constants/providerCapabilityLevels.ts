@@ -31,8 +31,9 @@ export const PROVIDER_CAPABILITY_LEVELS = {
   // Approvals only for exec/patch; `dynamicTools` only on thread/start;
   // `outputSchema`; skill roots are process-global (`skills/extraRoots/set`).
   codex: { approvalGating: 'exec_and_patch', hostTools: 'start_only', structuredOutput: 'native', skills: 'directories' },
-  // Never asks; no host tools, no MCP, no skills.
-  opencode: { approvalGating: 'none', hostTools: 'none', structuredOutput: 'none', skills: 'none' },
+  // OpenCode 2: session permission rules + `permission.asked` per call; host tools through client-hosted MCP on
+  // every turn; output through a host tool; `skills` directories in GeneratorAI's own config layer.
+  opencode: { approvalGating: 'per_call', hostTools: 'full', structuredOutput: 'tool', skills: 'directories' },
   // session/request_permission per call; the agent owns its tools.
   acp: { approvalGating: 'per_call', hostTools: 'none', structuredOutput: 'none', skills: 'none' },
 } as const satisfies Record<string, CapabilityLevels>;
@@ -114,11 +115,11 @@ export function sessionCapabilityWarnings(input: {
   }
   if (input.wantsSkills && levels.skills === 'none') {
     out.push({ code: 'skills_unsupported', severity: 'warning', message: `${name} does not load skills.` });
-  } else if (input.wantsSkills && input.provider === 'codex') {
+  } else if (input.wantsSkills && (input.provider === 'codex' || input.provider === 'opencode')) {
     out.push({
       code: 'skills_process_global',
       severity: 'warning',
-      message: 'Codex skill folders are shared by every Codex session on this server.',
+      message: `${input.provider === 'codex' ? 'Codex' : 'OpenCode'} skill folders are shared by every ${input.provider === 'codex' ? 'Codex' : 'OpenCode'} session on this server.`,
     });
   }
   return out;

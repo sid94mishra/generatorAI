@@ -1,52 +1,41 @@
 // ────────────────────────────────────────────────────────────────
-// OpenCodeProvider — IAgentHarness wrapping `opencode serve` (HTTP + SSE).
+// OpenCodeProvider — IAgentHarness over OpenCode 2's HTTP API.
 //
-// W38 — OpenCode provider. Talks to a running `opencode serve` over its HTTP
-// API and consumes its server-sent event stream.
+// Drives `opencode serve` (OpenCode ≥ 2.0.0, `@opencode/cli`) directly: routes
+// under `/api/*`, types generated from the pinned 2.2.7 OpenAPI document
+// (`protocol/opencode.generated.ts`, L18). docs/agent-platform/opencode.md
+// describes the integration end to end; the moving parts:
 //
-// ── Protocol provenance ──────────────────────────────────────────
-// Every route and payload type used here comes from
-// `protocol/opencode.generated.ts`, emitted by `pnpm generate:schemas` from
-// `schemas/opencode/openapi.json` — the OpenAPI 3.1 document `opencode serve`
-// publishes at `GET /doc`. The generated `OPENCODE_OPERATIONS` table records,
-// per route, whether its success response is `text/event-stream`.
+//   server.ts       spawn `serve --stdio --port 0`, Basic auth, version gate
+//   events.ts       the one server-wide SSE subscription (`GET /api/event`)
+//   permissions.ts  the chat's permission mode as session rules; asks → gate
+//   forms.ts        the `question` tool's forms → the question card
+//   clientMcp.ts    the platform's tools as a client-hosted MCP server
+//   models.ts       the model catalog, variants as reasoning efforts
+//   config.ts       GeneratorAI's own config layer (compaction, skills)
 //
-// That table is the correction this rewrite is built on. The previous version
-// POSTed the prompt to `/session/{id}/message` and read the RESPONSE BODY as an
-// SSE stream. It is not one: the document declares exactly four streaming
-// routes, and `session.prompt` is not among them — it returns a single JSON
-// `{ info, parts }` once the turn is over. So the old parser looked for
-// `data: ` lines in a JSON object, matched none, and every turn returned empty
-// content having emitted no tokens at all.
+// A turn: the session's state (rules for the turn's mode, model, agent,
+// instructions, environment, MCP servers, host tools) is brought up to date,
+// the prompt is ADMITTED (`POST /prompt` returns at once), and the turn ends on
+// the session's execution terminal (`session.execution.succeeded | failed |
+// interrupted`) — the only turn boundary OpenCode 2 has. Text and reasoning
+// arrive as real deltas; tool calls as `session.tool.*`.
 //
-// The real shape, verified against opencode-ai@1.18.25:
+// Safety: every session carries explicit permission rules (OpenCode's own
+// default is allow-everything); every in-flight turn is interrupted before the
+// provider stops (an interrupt releases OpenCode's execution claim, so the
+// user's own OpenCode service cannot resume our turn unattended later); and on
+// (re)connecting, sessions of ours the server still runs are interrupted
+// before new work is accepted.
 //
-//   • Streaming is a SEPARATE, server-wide subscription: `GET /event`. One
-//     connection carries every session's events, so this provider holds one and
-//     demultiplexes by `properties.sessionID`.
-//   • Text arrives as `message.part.updated` whose `part.text` is CUMULATIVE,
-//     not a delta. Token deltas are derived by diffing against the last text
-//     seen for that part id.
-//   • A turn ends at `session.idle`; `message.updated` carries the assistant
-//     message's `finish` reason. Truncation is `MessageOutputLengthError` on a
-//     `session.error` event, not a `stop_reason: length` field.
-//   • `POST /session` takes `{ parentID?, title? }`. It has never accepted
-//     `model` or `systemPrompt` — both were sent and silently ignored, so every
-//     conversation ran on the server default. The model belongs on the PROMPT,
-//     as `{ providerID, modelID }`, and the system prompt as `system`.
-//   • Cancellation is `POST /session/{id}/abort`, not `DELETE .../message`.
-//   • Models come from `GET /config/providers`, which returns real capability
-//     and context-window metadata. `GET /model` does not exist.
-//
-// Architecture laws honoured:
-//   L9:  capabilities() declared, never probed.
-//   L18: protocol types generated from a pinned upstream artifact.
-//   W13: truncation guard — MessageOutputLengthError fails open tool calls.
-//   W13: semantic cancellation — abort emits `harness.cancelled`, not throws.
+// Laws: L9 capabilities declared; L18 generated protocol; W13 truncation guard
+// (finish `length` fails open tool calls) and semantic cancellation.
 // ────────────────────────────────────────────────────────────────
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type {
   IAgentHarness,
   CreateConversationParams,
@@ -61,385 +50,450 @@ import type {
   HarnessAgentInfo,
   ProviderCapabilities,
   CompactConversationOptions,
+  ForkConversationOptions,
+  ForkConversationResult,
+  RewindConversationOptions,
+  HarnessPermissionMode,
+  AutoCompactSetting,
+  McpServerConfig,
+  ToolDefinition,
 } from '@generatorai/core';
 import { COMPACTION_INFO, describeCompaction } from '@generatorai/shared';
 import type { AgentEvent, CompactionTrigger } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
 import type { OpenCodeProviderOptions } from '../../types.js';
 import type {
-  Agent as OpenCodeAgent,
-  AssistantMessage,
-  Event as OpenCodeEvent,
-  Model as OpenCodeModel,
-  Part as OpenCodePart,
-  PermissionRule,
-  Provider as OpenCodeProviderInfo,
-  Session as OpenCodeSession,
+  Agent_Info,
+  Model_Info,
+  Session_Info,
+  Session_Message_Info,
+  SessionMessagesResponse,
+  Session_StructuredError,
+  TokenUsage_Info,
+  Tool_Content,
 } from '../../protocol/opencode.generated.js';
 import { OPENCODE_OPERATIONS } from '../../protocol/opencode.generated.js';
-
-// ── Type aliases ─────────────────────────────────────────────────
+import { openEventStream, type OpenCodeFrame } from './events.js';
+import {
+  HOST_TOOL_NAMESPACE,
+  rememberRules,
+  sessionRules,
+  toPermissionRequest,
+  type PermissionAsked,
+  type PermissionRule,
+} from './permissions.js';
+import { answerFromResponse, isQuestionForm, questionsFromForm, type FormInfo } from './forms.js';
+import { ClientMcpHost } from './clientMcp.js';
+import {
+  effortVariants,
+  isUsableChatModel,
+  parseModelRef,
+  qualifiedModelId,
+  toHarnessModel,
+  type ModelRef,
+} from './models.js';
+import { compactionThreshold, renderConfig, writeConfig } from './config.js';
+import {
+  basicAuth,
+  checkServer,
+  spawnServer,
+  stopProcess,
+  OpenCodeVersionError,
+  type SpawnedServer,
+} from './server.js';
 
 type Listener<T> = (event: T) => void;
 type UnsubFn = () => void;
 
-/** A model reference on the wire: OpenCode addresses models by provider + id. */
-interface ModelRef {
-  providerID: string;
-  modelID: string;
-}
+/** Session metadata key that marks a session as created by (and owned by) this app. */
+export const OWNER_METADATA_KEY = 'generatorai.conversationId';
+/** Instruction entry carrying the app's system-prompt append (rendered as `<context key="…">`). */
+export const INSTRUCTION_KEY = 'generatorai-system';
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_SSE_TIMEOUT_MS = 60_000; // the server sends a heartbeat every 15 s
+const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
+const DEFAULT_TURN_TIMEOUT_MS = 0;
+/** After an interrupt, how long the server gets to confirm before the turn is settled locally. */
+const INTERRUPT_SETTLE_MS = 3_000;
+/** After an admitted prompt, how long before checking whether it joined a run already in progress. */
+const START_CHECK_MS = 10_000;
+/** The catalog is re-read at most this often. */
+const CATALOG_TTL_MS = 5 * 60_000;
+/** Budget for interrupting in-flight turns while stopping. */
+const STOP_INTERRUPT_BUDGET_MS = 5_000;
+
+type TurnOutcome = { kind: 'done' } | { kind: 'cancelled' } | { kind: 'failed'; error: Error };
 
 interface TurnState {
-  /** Resolves the awaited turn. */
-  settle: (outcome: 'done' | 'cancelled') => void;
-  /** Rejects the awaited turn. */
-  fail: (err: Error) => void;
-  /** Cumulative assistant text, assembled from part updates. */
-  text: string;
-  /** Last cumulative text seen per part id, so deltas can be derived. */
-  partText: Map<string, string>;
-  /** Tool part ids started but not yet completed. */
-  openTools: Set<string>;
-  /** Assistant message id, once known, so other sessions' parts are excluded. */
-  assistantMessageId: string | null;
+  /** The prompt has been sent: execution events from now on belong to this turn. */
+  posted: boolean;
+  /** `session.execution.started` seen since `posted`; a terminal before it belongs to an older run. */
+  started: boolean;
   settled: boolean;
-  /**
-   * Whether a terminal event (`harness.idle` / `harness.cancelled`) has already
-   * been broadcast for this turn.
-   *
-   * The stream and the HTTP response both describe the same ending, and both
-   * are consulted — so without this a cancelled turn emitted `harness.cancelled`
-   * twice: once when `session.error` carried `MessageAbortedError`, and again
-   * when the prompt response came back with `finish: "aborted"`.
-   */
-  terminalEmitted: boolean;
-}
-
-interface ConversationState {
-  /** The OpenCode session id (`ses_…`) from POST /session. */
-  sessionId: string;
-  params: CreateConversationParams;
-  /**
-   * Model for this conversation, resolved once at creation from
-   * `params.model ?? opts.defaultModel` and sent on every prompt. OpenCode has
-   * no per-session model, so this must ride along with each message or the
-   * user's choice is discarded.
-   */
-  model: ModelRef | null;
-  /** System prompt, sent on every prompt for the same reason. */
-  system: string | undefined;
-  /**
-   * Project root for this conversation, sent as `?directory=` on every
-   * session-scoped request.
-   *
-   * `opencode serve` is one process serving many roots: every endpoint in
-   * `schemas/opencode/openapi.json` — `POST /session` included — takes an
-   * optional `directory` query parameter naming the project the call applies
-   * to, and `Session.directory` is what the server echoes back. Without it a
-   * session inherits the SERVER's cwd, so a chat bound to a worktree read and
-   * wrote the directory the GeneratorAI server happened to start in.
-   *
-   * Undefined when neither the conversation nor `opts.defaultCwd` names one —
-   * then the server's own default applies, as before.
-   */
-  directory: string | undefined;
-  listeners: Set<Listener<AgentEvent>>;
-  warnings: ConversationWarning[];
-  turn: TurnState | null;
-  /** A compaction this adapter started (`compactConversation`), while it runs. */
-  compacting: CompactionState | null;
-  /** The provider's own compaction seen on the stream (`session.next.compaction.started`), until it ends. */
-  autoCompacting: boolean;
-  /**
-   * When the last compaction (ours or the provider's) was reported: its v1 and v2 end events, which can trail the
-   * summarize answer, describe that same compaction.
-   */
-  lastCompactedAt?: number;
+  finish: (outcome: TurnOutcome) => void;
+  done: Promise<TurnOutcome>;
+  text: string;
+  /** assistantMessageID → that step's text. */
+  stepText: Map<string, string>;
+  /** `assistantMessageID:ordinal` → reasoning text, for `reasoning_complete`. */
+  reasoning: Map<string, string>;
+  /** callKey → displayed tool name, for calls started and not finished. */
+  openTools: Map<string, { tool: string; parentToolCallId?: string }>;
+  usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
+  model?: string;
+  interruptTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface CompactionState {
-  /** Cancels the summarize request (Stop). */
-  abort: AbortController;
-  /** `compact_boundary` already emitted — the stream's `session.compacted` must not repeat it. */
-  boundaryEmitted: boolean;
+  settled: boolean;
+  resolve: () => void;
+  reject: (err: Error) => void;
+  cancelled: boolean;
+  /** `session.compaction.ended` seen; waiting for the run's execution terminal. */
+  ended: boolean;
+  graceTimer?: ReturnType<typeof setTimeout>;
 }
 
-/** Wall-clock deadline shared by every non-streaming call. */
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-/** Idle deadline between SSE frames on the shared event stream. */
-const DEFAULT_SSE_TIMEOUT_MS = 120_000;
-/** How long `autoStart` waits for a spawned server to answer. */
-const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
-/** Ceiling on a single turn with no terminal event. 0 disables. */
-const DEFAULT_TURN_TIMEOUT_MS = 0;
-/**
- * How long the slower of {prompt response, event stream} gets to catch up once
- * the other has reported the turn is over. The two are independent connections
- * and routinely settle out of order.
- */
-const DEFAULT_SETTLE_GRACE_MS = 2_000;
+interface ConversationState {
+  id: string;
+  sessionId: string;
+  params: CreateConversationParams;
+  directory: string;
+  listeners: Set<Listener<AgentEvent>>;
+  warnings: ConversationWarning[];
+  turn: TurnState | null;
+  compaction: CompactionState | null;
+  /** OpenCode's own (auto) compaction seen starting and not yet ended. */
+  autoCompacting: boolean;
+  /** "Don't ask again" answers, kept as session rules. */
+  remembered: PermissionRule[];
+  /** The permission mode the session's rules were last set for (a turn's mode can differ from the chat's). */
+  mode: HarnessPermissionMode | undefined;
+  /** What the session last received, so unchanged state is not re-sent every turn. */
+  applied: {
+    rules?: string;
+    model?: string;
+    agent?: string;
+    instructions?: string | null;
+    env?: string;
+    mcp?: string;
+  };
+  lastContextTokens?: number;
+}
 
-/** Errors OpenCode reports on `session.error` that mean the model was truncated. */
-const TRUNCATION_ERRORS: ReadonlySet<string> = new Set([
-  'MessageOutputLengthError',
-  'ContextOverflowError',
-]);
-/** Errors that mean the user (or we) stopped the turn. */
-const ABORT_ERRORS: ReadonlySet<string> = new Set(['MessageAbortedError']);
+interface SessionEntry {
+  conversationId: string;
+  /** Set for a subagent's session: the parent session, and the tool call that spawned it once known. */
+  parentSessionId?: string;
+  parentToolCallId?: string;
+}
 
-// ── OpenCodeProvider ─────────────────────────────────────────────
-
-/** The server is OpenCode 2, whose HTTP API this adapter does not speak. */
-class OpenCode2Unsupported extends Error {
-  constructor() {
-    super(
-      'OpenCodeProvider: this opencode is OpenCode 2, which GeneratorAI does not support yet. ' +
-        'Install OpenCode 1 (the `opencode-ai` package), or set `binaryPath` to an OpenCode 1 binary.',
-    );
+class OpenCodeHttpError extends Error {
+  constructor(message: string, readonly status: number, readonly tag?: string) {
+    super(message);
   }
 }
 
+/** `{sessionID}`-style substitution into a generated path template. */
+function route(template: string, params: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) =>
+    params[key] === undefined ? whole : encodeURIComponent(params[key]!),
+  );
+}
+
+const OPS = OPENCODE_OPERATIONS;
+
+/** `ses_…` → the session path for an operation. */
+const sessionPath = (op: keyof typeof OPS, sessionID: string, extra: Record<string, string> = {}): string =>
+  route(OPS[op].path, { sessionID, ...extra });
+
+function structuredErrorMessage(e: Session_StructuredError | undefined, fallback: string): string {
+  return e?.message?.trim() || e?.type || fallback;
+}
+
+/** A tool result's content as the text the transcript shows. */
+function toolContentText(content: Tool_Content[] | undefined): string {
+  return (content ?? [])
+    .map((c) => (c.type === 'text' ? c.text : `[file: ${c.name ?? c.uri}]`))
+    .join('\n');
+}
+
+/** The platform's own tools are listed to the model as `generatorai_<tool>`; the app knows them by `<tool>`. */
+function displayToolName(name: string): string {
+  const prefix = `${HOST_TOOL_NAMESPACE}_`;
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name;
+}
+
+/** A model reference as a comparable key (field order differs between what we send and what the server echoes). */
+function modelKey(ref: ModelRef | undefined | null): string | undefined {
+  return ref ? `${ref.providerID}/${ref.id}#${ref.variant ?? ''}` : undefined;
+}
+
+/** MCP server names OpenCode accepts. */
+function mcpName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 /**
- * W38 — IAgentHarness backed by `opencode serve`.
- *
- * Lifecycle:
- *   1. `initialize()` probes the server (`GET /session`), starting one with
- *      `autoStart` when it is not reachable, then opens the shared event
- *      stream.
- *   2. `createConversation()` calls `POST /session` → session id.
- *   3. `sendPromptAndWait()` POSTs the prompt and resolves from the shared
- *      stream, streaming `harness.token` as the text parts grow.
- *   4. `abortConversation()` calls `POST /session/{id}/abort`.
- *   5. `shutdown()` closes the stream and stops only a server WE started.
+ * W38 — IAgentHarness backed by OpenCode 2.
  */
 export class OpenCodeProvider implements IAgentHarness {
-  private baseUrl: string;
   private readonly opts: OpenCodeProviderOptions;
   private readonly requestTimeoutMs: number;
   private readonly sseTimeoutMs: number;
   private readonly turnTimeoutMs: number;
-  private clientState: HarnessClientState = 'starting';
-  private clientEventListeners = new Set<Listener<HarnessClientEvent>>();
-  private conversations = new Map<string, ConversationState>();
-  /** sessionId → conversationId, for demultiplexing the shared event stream. */
-  private sessionIndex = new Map<string, string>();
-  /** Only set when `autoStart` spawned the server — we own it, so we stop it. */
-  private serverProc: ChildProcess | null = null;
+  private readonly startupTimeoutMs: number;
 
-  /** Aborts the shared event-stream reader. */
+  private clientState: HarnessClientState = 'starting';
+  private readonly clientEventListeners = new Set<Listener<HarnessClientEvent>>();
+  private readonly conversations = new Map<string, ConversationState>();
+  /** OpenCode session id → owning conversation (top-level and subagent sessions). */
+  private readonly sessions = new Map<string, SessionEntry>();
+
+  private baseUrl = '';
+  private auth = '';
+  private server: SpawnedServer | null = null;
+  private ready: Promise<void> | null = null;
   private streamAbort: AbortController | null = null;
-  /** Resolves once the stream is connected, so a prompt cannot race it. */
-  private streamReady: Promise<void> | null = null;
-  /** True once `shutdown()` has run, so the stream does not reconnect. */
+  private mcp: ClientMcpHost | null = null;
   private closed = false;
+  /** Bumped every (re)connect, so a dying generation's callbacks cannot touch the next one. */
+  private generation = 0;
+
+  private catalog: { at: number; models: Model_Info[]; defaultId?: string } | null = null;
+  /** Tool names seen on `session.tool.input.started` (`session.tool.called` carries none), until the call ends. */
+  private readonly toolNames = new Map<string, string>();
+  private agentsCache: Agent_Info[] | null = null;
+
+  private readonly configFile: string;
+  private configContent: string | null = null;
+  /** The app's auto-compaction setting as last seen on a conversation (it is one app-wide setting). */
+  private autoCompact: AutoCompactSetting | undefined;
 
   constructor(opts: OpenCodeProviderOptions) {
     this.opts = opts;
-    // No invented default port. `opencode serve --port` defaults to 0 (an
-    // ephemeral port), so there is no well-known address to guess: the caller
-    // supplies `baseUrl`, or `autoStart` binds a port we choose and we read the
-    // real URL back off the child's output.
-    this.baseUrl = (opts.baseUrl ?? '').replace(/\/$/, '');
     this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.sseTimeoutMs = opts.sseTimeoutMs ?? DEFAULT_SSE_TIMEOUT_MS;
     this.turnTimeoutMs = opts.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    this.startupTimeoutMs = opts.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
+    this.autoCompact = opts.autoCompact;
+    this.configFile =
+      opts.configFile ?? path.join(os.tmpdir(), 'generatorai-opencode', `opencode-${process.pid}-${randomUUID().slice(0, 8)}.json`);
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
 
   async initialize(): Promise<void> {
     this.closed = false;
-
-    if (this.baseUrl && (await this.probe())) {
-      this.clientState = 'running';
-      await this.openEventStream();
-      return;
-    }
-
-    if (this.opts.autoStart) {
-      await this.startServer();
-      this.clientState = 'running';
-      await this.openEventStream();
-      return;
-    }
-
-    this.clientState = 'error';
-    throw new Error(
-      this.baseUrl
-        ? `OpenCodeProvider: cannot reach opencode serve at ${this.baseUrl}. ` +
-          `Start it with \`opencode serve --port <port>\`, set \`autoStart: true\` to have this ` +
-          `provider start it, or correct \`baseUrl\`.`
-        : `OpenCodeProvider: no \`baseUrl\` given and \`autoStart\` is false. ` +
-          `\`opencode serve\` binds an ephemeral port by default, so there is no address to ` +
-          `assume — pass \`baseUrl\`, or set \`autoStart: true\`.`,
-    );
-  }
-
-  /** Spawn `opencode serve` ourselves and wait for it to answer. */
-  private async startServer(): Promise<void> {
-    const bin = this.opts.binaryPath ?? 'opencode';
-    // Bind an explicit port so the URL is knowable. When the caller gave a
-    // baseUrl we honour its port; otherwise we let the OS choose and read the
-    // bound address back from the child's own startup line.
-    const configuredPort = this.baseUrl ? new URL(this.baseUrl).port : '';
-    const args = this.opts.serveArgs ?? [
-      'serve',
-      '--hostname',
-      '127.0.0.1',
-      '--port',
-      configuredPort || '0',
-    ];
-
-    const proc = spawn(bin, args, {
-      // Without an explicit cwd the server inherits the GeneratorAI server's
-      // own working directory and treats it as the default project root.
-      // Per-conversation roots ride on `?directory=` (see
-      // `ConversationState.directory`); this is only the fallback.
-      ...(this.opts.defaultCwd ? { cwd: this.opts.defaultCwd } : {}),
-      // OpenCode runs model-authored tool calls, so it gets the allowlisted
-      // harness environment, never the full parent env — the same rule
-      // `childEnv.ts` enforces for every other spawned provider.
-      env: buildHarnessEnv({ extra: this.opts.env }),
-      // stdout is PIPED because the server prints the address it actually bound
-      // to, which is the only way to learn an ephemeral port.
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    this.serverProc = proc;
-
-    let stderrTail = '';
-    proc.stderr?.setEncoding('utf8');
-    proc.stderr?.on('data', (c: string) => { stderrTail = (stderrTail + c).slice(-8_192); });
-
-    // `opencode serve` announces itself as
-    //   "opencode server listening on http://127.0.0.1:PORT"
-    // on stdout (and, depending on --print-logs, stderr).
-    const discoveredUrl = new Promise<string>((resolve) => {
-      const scan = (chunk: string): void => {
-        const match = /https?:\/\/[0-9a-zA-Z.\-\[\]:]+:\d+/.exec(chunk);
-        if (match) resolve(match[0]);
-      };
-      proc.stdout?.setEncoding('utf8');
-      proc.stdout?.on('data', scan);
-      proc.stderr?.on('data', scan);
-    });
-
-    const spawnFailure = new Promise<never>((_, reject) => {
-      proc.once('error', (err) => reject(new Error(
-        (err as NodeJS.ErrnoException).code === 'ENOENT'
-          ? `OpenCodeProvider: opencode binary "${bin}" not found. Install it, or set \`binaryPath\`.`
-          : err.message,
-      )));
-      proc.once('exit', (code) => reject(new Error(
-        `OpenCodeProvider: \`${bin} ${args.join(' ')}\` exited with code ${code}` +
-        (stderrTail.trim() ? `\n--- opencode stderr ---\n${stderrTail.trim()}` : ''),
-      )));
-    });
-
-    const startupTimeoutMs = this.opts.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
-    const deadline = Date.now() + startupTimeoutMs;
     try {
-      // Learn the address first — polling a URL we only guessed at is how an
-      // ephemeral-port server looks identical to a dead one.
-      if (!this.baseUrl) {
-        const url = await Promise.race([
-          discoveredUrl,
-          spawnFailure,
-          new Promise<never>((_, reject) => {
-            const t = setTimeout(
-              () => reject(new Error(
-                `OpenCodeProvider: \`${bin} ${args.join(' ')}\` did not announce a listening ` +
-                `address within ${startupTimeoutMs} ms.`,
-              )),
-              startupTimeoutMs,
-            );
-            t.unref?.();
-          }),
-        ]);
-        this.baseUrl = url.replace(/\/$/, '');
-      }
-
-      while (Date.now() < deadline) {
-        // Race the poll against the child dying, so a server that fails to
-        // bind reports its own reason instead of a blank timeout.
-        const ready = await Promise.race([this.probe(), spawnFailure]);
-        if (ready) return;
-        await new Promise((r) => setTimeout(r, 150));
-      }
+      await this.ensureReady();
+      this.clientState = 'running';
     } catch (err) {
       this.clientState = 'error';
-      await this.stopServer();
-      throw err instanceof Error ? err : new Error(String(err));
+      throw err;
     }
-    this.clientState = 'error';
-    await this.stopServer();
-    throw new Error(
-      `OpenCodeProvider: started \`${bin} ${args.join(' ')}\` but it did not answer at ` +
-      `${this.baseUrl} within ${startupTimeoutMs} ms.`,
-    );
   }
 
-  private async stopServer(): Promise<void> {
-    const proc = this.serverProc;
-    this.serverProc = null;
-    if (!proc || proc.exitCode != null || proc.signalCode != null) return;
-    proc.kill('SIGTERM');
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => { proc.kill('SIGKILL'); resolve(); }, 5_000);
-      timer.unref?.();
-      proc.once('exit', () => { clearTimeout(timer); resolve(); });
+  /** Whether the server this provider talks to was started by it (and so takes its config file). */
+  private get ownsServer(): boolean {
+    return !this.opts.baseUrl;
+  }
+
+  /** Server up, version checked, event stream connected, ours-still-running interrupted. Shared by concurrent callers. */
+  private ensureReady(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('OpenCodeProvider: shut down'));
+    if (!this.ready) {
+      const attempt = this.connect();
+      this.ready = attempt;
+      attempt.catch(() => { if (this.ready === attempt) this.ready = null; });
+    }
+    return this.ready;
+  }
+
+  private async connect(): Promise<void> {
+    const gen = ++this.generation;
+    if (this.opts.baseUrl) {
+      this.baseUrl = this.opts.baseUrl.replace(/\/$/, '');
+      if (!this.opts.password) {
+        throw new Error('OpenCodeProvider: an external OpenCode server needs its password (`password`); OpenCode 2 always requires authentication.');
+      }
+      this.auth = basicAuth(this.opts.password);
+    } else if (this.opts.autoStart) {
+      const command = this.opts.binaryPath;
+      if (!command) throw new Error('OpenCodeProvider: OpenCode is not installed (no binary found).');
+      this.writeManagedConfig();
+      const server = await spawnServer({
+        command,
+        argsPrefix: this.opts.binaryArgs ?? [],
+        ...(this.opts.defaultCwd ? { cwd: this.opts.defaultCwd } : {}),
+        env: buildHarnessEnv({
+          // OpenCode's own variables: where its data, config and models live. Its credentials are in its data dir.
+          passthrough: [
+            'XDG_STATE_HOME', 'OPENCODE_CONFIG_DIR', 'OPENCODE_DB', 'OPENCODE_MODELS_URL', 'OPENCODE_MODELS_PATH',
+            'OPENCODE_DISABLE_MODELS_FETCH', 'OPENCODE_DISABLE_PROJECT_CONFIG', 'OPENCODE_DISABLE_CLAUDE_CODE',
+            'OPENCODE_DISABLE_CLAUDE_CODE_SKILLS', 'OPENCODE_GIT_BASH_PATH',
+          ],
+          extra: {
+            ...this.opts.env,
+            OPENCODE_CLIENT: 'generatorai',
+            OPENCODE_CONFIG: this.configFile,
+          },
+        }),
+        startupTimeoutMs: this.startupTimeoutMs,
+      });
+      this.server = server;
+      this.baseUrl = server.url;
+      this.auth = basicAuth(server.password);
+      void server.exited.then((code) => {
+        if (this.generation !== gen || this.closed || this.server !== server) return;
+        this.server = null;
+        this.lost(gen, `the OpenCode server exited (code ${code})${server.stderrTail().trim() ? `: ${server.stderrTail().trim().slice(-500)}` : ''}`);
+      });
+    } else {
+      throw new Error('OpenCodeProvider: no `baseUrl` and `autoStart` is off — there is no OpenCode server to talk to.');
+    }
+
+    try {
+      await checkServer(this.baseUrl, this.auth, this.requestTimeoutMs);
+      await this.openStream(gen);
+      this.mcp?.close().catch(() => undefined);
+      this.mcp = new ClientMcpHost({
+        url: this.baseUrl,
+        headers: { Authorization: this.auth },
+        name: HOST_TOOL_NAMESPACE,
+        toolsFor: (dir) => this.toolsAt(dir),
+        resolveCall: (sid, tool) => this.resolveHostTool(sid, tool),
+        logger: { warn: (m) => this.opts.logger?.warn?.(m) },
+      });
+      await this.interruptOrphans();
+      // A respawned server knows nothing of what lives only in memory (session environments, runtime MCP servers,
+      // the client-MCP socket): every live conversation re-sends it on its next turn.
+      for (const conv of this.conversations.values()) conv.applied = { rules: conv.applied.rules, model: conv.applied.model, agent: conv.applied.agent, instructions: conv.applied.instructions };
+    } catch (err) {
+      await this.teardownServer(false);
+      throw err;
+    }
+  }
+
+  /** The event stream for generation `gen`. A drop fails what is waiting and lets the next call reconnect. */
+  private async openStream(gen: number): Promise<void> {
+    this.streamAbort?.abort();
+    const abort = new AbortController();
+    this.streamAbort = abort;
+    const { ended } = await openEventStream({
+      url: this.baseUrl,
+      headers: { Authorization: this.auth },
+      signal: abort.signal,
+      connectTimeoutMs: this.requestTimeoutMs,
+      idleTimeoutMs: this.sseTimeoutMs,
+      onFrame: (frame) => { if (this.generation === gen) this.dispatch(frame); },
+    });
+    ended.catch((err: unknown) => {
+      if (this.generation !== gen || this.closed) return;
+      this.lost(gen, `event stream lost: ${err instanceof Error ? err.message : String(err)}`);
     });
   }
 
-  private async probe(): Promise<boolean> {
-    if (!this.baseUrl) return false;
-    try {
-      const resp = await this.fetch(OPENCODE_OPERATIONS['session.list'].path);
-      // Drain the body so the socket returns to the pool instead of dangling.
-      await resp.arrayBuffer().catch(() => undefined);
-      if (resp.status === 404) await this.refuseOpenCode2();
-      return resp.ok;
-    } catch (err) {
-      if (err instanceof OpenCode2Unsupported) throw err;
-      return false;
+  /** The server or its stream went away: fail every waiter, report it, and reconnect on the next call. */
+  private lost(gen: number, why: string): void {
+    if (this.generation !== gen) return;
+    this.generation++;
+    this.ready = null;
+    this.streamAbort?.abort();
+    this.streamAbort = null;
+    void this.mcp?.close();
+    this.mcp = null;
+    const err = new Error(`OpenCodeProvider: ${why}`);
+    for (const conv of this.conversations.values()) {
+      conv.turn?.finish({ kind: 'failed', error: err });
+      if (conv.compaction && !conv.compaction.settled) this.settleCompaction(conv, err);
     }
+    for (const h of this.clientEventListeners) h({ type: 'client.error', data: { message: err.message } });
+    this.opts.logger?.warn?.(err.message);
+    if (this.server) void this.teardownServer(false);
   }
 
   /**
-   * OpenCode 2 (`@opencode/cli`, also a binary named `opencode`) serves a different HTTP API under `/api/*`:
-   * without this its server answered every probe with 404 and the start timed out with no reason given.
+   * Decision: before accepting work, interrupt every session of ours the server reports as still running — a turn
+   * that outlived the app (an external server) must not keep going with nobody at its gates.
    */
-  private async refuseOpenCode2(): Promise<void> {
-    const resp = await this.fetch('/api/session').catch(() => null);
-    await resp?.arrayBuffer().catch(() => undefined);
-    if (resp?.ok) throw new OpenCode2Unsupported();
+  private async interruptOrphans(): Promise<void> {
+    let active: Record<string, unknown> = {};
+    try {
+      active = (await this.json<{ data: Record<string, unknown> }>('GET', OPS['session.active'].path)).data ?? {};
+    } catch { return; }
+    await Promise.all(Object.keys(active).map(async (sessionID) => {
+      try {
+        const info = (await this.json<{ data: Session_Info }>('GET', sessionPath('session.get', sessionID))).data;
+        if (typeof info.metadata?.[OWNER_METADATA_KEY] !== 'string') return;
+        await this.json('POST', sessionPath('session.interrupt', sessionID));
+        this.opts.logger?.warn?.(`[OpenCodeProvider] interrupted session ${sessionID}, still running from before`);
+      } catch { /* best effort */ }
+    }));
+  }
+
+  /** Interrupt every turn and compaction this provider started, so OpenCode releases their execution claims. */
+  private async interruptInFlight(budgetMs: number): Promise<void> {
+    if (!this.baseUrl || !this.auth) return;
+    const busy = [...this.conversations.values()].filter((c) => c.turn || c.compaction);
+    if (busy.length === 0) return;
+    await Promise.race([
+      Promise.all(busy.map((c) => this.json('POST', sessionPath('session.interrupt', c.sessionId), undefined, { timeoutMs: budgetMs }).catch(() => undefined))),
+      new Promise((r) => { const t = setTimeout(r, budgetMs); t.unref?.(); }),
+    ]);
+  }
+
+  private async teardownServer(interrupt: boolean): Promise<void> {
+    if (interrupt) await this.interruptInFlight(STOP_INTERRUPT_BUDGET_MS);
+    this.streamAbort?.abort();
+    this.streamAbort = null;
+    await this.mcp?.close().catch(() => undefined);
+    this.mcp = null;
+    const server = this.server;
+    this.server = null;
+    if (server) await stopProcess(server.proc, server.exited, 3_000);
   }
 
   async stop(): Promise<void> { await this.shutdown(); }
 
   async forceStop(): Promise<void> {
     this.closed = true;
+    this.generation++;
+    await this.interruptInFlight(1_000);
+    this.failAll(new Error('OpenCodeProvider: force-stopped'));
     this.streamAbort?.abort();
-    this.serverProc?.kill('SIGKILL');
-    this.serverProc = null;
-    this.failAllTurns(new Error('OpenCodeProvider: force-stopped'));
+    void this.mcp?.close();
+    this.server?.proc.kill('SIGKILL');
+    this.server = null;
+    this.ready = null;
     this.clientState = 'stopped';
   }
 
   async shutdown(): Promise<void> {
     this.closed = true;
-    this.streamAbort?.abort();
-    this.streamAbort = null;
-    this.streamReady = null;
-    this.failAllTurns(new Error('OpenCodeProvider: shut down'));
-    // Only a server this provider started is ours to stop.
-    await this.stopServer();
+    this.generation++;
+    await this.teardownServer(true);
+    this.failAll(new Error('OpenCodeProvider: shut down'));
+    this.ready = null;
     this.clientState = 'stopped';
+  }
+
+  private failAll(err: Error): void {
+    for (const conv of this.conversations.values()) {
+      conv.turn?.finish({ kind: 'failed', error: err });
+      if (conv.compaction && !conv.compaction.settled) this.settleCompaction(conv, err);
+    }
   }
 
   getClientState(): HarnessClientState { return this.clientState; }
 
   async ping(): Promise<boolean> {
-    return this.probe().catch(() => false);
+    if (!this.baseUrl || !this.auth) return false;
+    try {
+      await checkServer(this.baseUrl, this.auth, this.requestTimeoutMs);
+      return true;
+    } catch { return false; }
   }
 
   onClientEvent(handler: Listener<HarnessClientEvent>): UnsubFn {
@@ -451,176 +505,283 @@ export class OpenCodeProvider implements IAgentHarness {
 
   capabilities(): ProviderCapabilities {
     return {
-      // Prompts take `FilePartInput` attachments; whether a given MODEL accepts
-      // images is reported per model by `GET /config/providers`.
+      // Attachments go as `file://` / `data:` URIs; per model, `Model.capabilities.input` says whether images are read.
       vision: true,
-      // OpenCode surfaces reasoning parts, but exposes no effort control.
       reasoning: true,
-      reasoningEfforts: [],
+      // Efforts are model variants; per model in the catalog.
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      // No plan tool of its own: plan turns carry the app's plan prefix and file through `record_plan` (as Codex).
       planMode: false,
-      mcpServers: true,  // OpenCode has native MCP support (`/mcp` routes)
-      // `GET /skill` exists; there is no way to point it at our directories.
-      skills: 'none',
-      // Nothing routes OpenCode's own permission requests to the session's
-      // gate, so a run cannot be held to `default` or `plan` (PD-17).
-      approvalGating: 'none',
-      hostTools: 'none',
-      structuredOutput: 'none',
-      sessionPersistence: true, // opencode persists sessions server-side
-      // Assistant messages carry `cost`; there is no budget ceiling to set.
+      mcpServers: true,
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'tool',
+      skills: 'directories',
+      sessionPersistence: true,
+      // Cost is reported (USD) but OpenCode has no budget ceiling.
       budgetTracking: false,
       computerUse: false,
-      // `POST /session/{id}/summarize` — no instructions field.
+      prewarm: false,
+      conversationFork: true,
+      conversationRewind: true,
       conversationCompact: true,
       compactInstructions: false,
+      accountLogin: false,
     };
   }
 
-  // ── Model discovery ───────────────────────────────────────────────
+  // ── HTTP ─────────────────────────────────────────────────────────
+
+  private async request(
+    method: string,
+    pathAndQuery: string,
+    body?: unknown,
+    opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<Response> {
+    if (!this.baseUrl) throw new Error('OpenCodeProvider: not connected — call initialize() first.');
+    const timeout = AbortSignal.timeout(opts.timeoutMs ?? this.requestTimeoutMs);
+    return fetch(`${this.baseUrl}${pathAndQuery}`, {
+      method,
+      headers: {
+        Authorization: this.auth,
+        Accept: 'application/json',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,
+    });
+  }
+
+  /** A JSON call: the parsed body, `undefined` for 204, an `OpenCodeHttpError` for anything else. */
+  private async json<T = unknown>(
+    method: string,
+    pathAndQuery: string,
+    body?: unknown,
+    opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<T> {
+    const resp = await this.request(method, pathAndQuery, body, opts);
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+      let message = text.slice(0, 500);
+      let tag: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { _tag?: string; message?: string };
+        tag = parsed._tag;
+        message = parsed.message ?? message;
+      } catch { /* not JSON */ }
+      throw new OpenCodeHttpError(
+        `OpenCodeProvider: ${method} ${pathAndQuery.split('?')[0]} failed with HTTP ${resp.status}${message ? `: ${message}` : ''}`,
+        resp.status,
+        tag,
+      );
+    }
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  private locationQuery(directory: string | undefined): string {
+    return directory ? `location[directory]=${encodeURIComponent(directory)}` : '';
+  }
+
+  // ── Models and agents ────────────────────────────────────────────
+
+  private async loadCatalog(force = false): Promise<NonNullable<OpenCodeProvider['catalog']>> {
+    if (!force && this.catalog && Date.now() - this.catalog.at < CATALOG_TTL_MS) return this.catalog;
+    await this.ensureReady();
+    const loc = this.locationQuery(this.opts.defaultCwd);
+    const [list, def] = await Promise.all([
+      this.json<{ data: Model_Info[] }>('GET', `${OPS['model.list'].path}?types=chat${loc ? `&${loc}` : ''}`),
+      this.json<{ data: Model_Info | null }>('GET', `${OPS['model.default'].path}${loc ? `?${loc}` : ''}`).catch(() => ({ data: null })),
+    ]);
+    this.catalog = {
+      at: Date.now(),
+      models: list.data ?? [],
+      ...(def.data ? { defaultId: qualifiedModelId(def.data) } : {}),
+    };
+    return this.catalog;
+  }
+
+  private modelInfo(qualified: string | undefined): Model_Info | undefined {
+    if (!qualified) return undefined;
+    return this.catalog?.models.find((m) => qualifiedModelId(m) === qualified);
+  }
 
   async getModels(): Promise<HarnessModel[]> {
+    const catalog = await this.loadCatalog(true);
+    return catalog.models.filter(isUsableChatModel).map((m) => toHarnessModel(m, qualifiedModelId(m) === catalog.defaultId));
+  }
+
+  private async agents(): Promise<Agent_Info[]> {
+    if (this.agentsCache) return this.agentsCache;
+    const loc = this.locationQuery(this.opts.defaultCwd);
+    const res = await this.json<{ data: Agent_Info[] }>('GET', `${OPS['agent.list'].path}${loc ? `?${loc}` : ''}`);
+    this.agentsCache = res.data ?? [];
+    return this.agentsCache;
+  }
+
+  async listAgents(_conversationId: string): Promise<HarnessAgentInfo[]> {
     try {
-      // `GET /model` does not exist — the previous version called it and so
-      // always returned an empty list. Models live under the providers route.
-      const resp = await this.fetch(OPENCODE_OPERATIONS['config.providers'].path);
-      if (!resp.ok) return [];
-      const body = await resp.json() as {
-        providers?: OpenCodeProviderInfo[];
-        default?: Record<string, string>;
-      };
-      const out: HarnessModel[] = [];
-      for (const provider of body.providers ?? []) {
-        for (const model of Object.values(provider.models ?? {})) {
-          out.push(this.toHarnessModel(provider, model as OpenCodeModel, body.default?.[provider.id]));
-        }
-      }
-      return out;
+      return (await this.agents())
+        .filter((a) => a.mode !== 'subagent' && !a.hidden)
+        .map((a) => ({
+          name: a.id,
+          ...(a.description ? { description: a.description } : {}),
+          ...(a.model ? { model: qualifiedModelId(a.model) } : {}),
+          source: 'opencode',
+        }));
     } catch { return []; }
   }
 
-  /** One `/config/providers` model, copying only the fields OpenCode returned (D-131). */
-  private toHarnessModel(provider: OpenCodeProviderInfo, model: OpenCodeModel, providerDefault?: string): HarnessModel {
-    const limit = model.limit as { context?: number; output?: number } | undefined;
-    const capabilities = model.capabilities as
-      | { reasoning?: boolean; input?: { image?: boolean } }
-      | undefined;
-    return {
-      // Qualified so two providers offering the same model id stay distinct —
-      // an unqualified id collides the moment a second provider is configured.
-      id: `${provider.id}/${model.id}`,
-      name: model.name ?? model.id,
-      provider: 'opencode',
-      ...(providerDefault === model.id ? { isDefault: true } : {}),
-      ...(typeof capabilities?.reasoning === 'boolean' ? { supportsReasoning: capabilities.reasoning } : {}),
-      ...(typeof capabilities?.input?.image === 'boolean' ? { supportsVision: capabilities.input.image } : {}),
-      ...(limit?.context ? { promptTokenLimit: limit.context } : {}),
-      ...(limit?.context && limit?.output
-        ? { totalContextWindow: limit.context + limit.output }
-        : {}),
-      ...(limit?.output ? { maxOutputTokens: limit.output } : {}),
-    };
-  }
-
-  /**
-   * Splits a model id into the `{ providerID, modelID }` pair the wire wants.
-   *
-   * Accepts both the qualified form `getModels()` emits (`opencode/gpt-5`) and
-   * a bare id, which is resolved against the caller-supplied default provider.
-   */
-  private parseModelRef(model: string | undefined): ModelRef | null {
-    if (!model) return null;
-    const slash = model.indexOf('/');
-    if (slash > 0) {
-      return { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) };
+  async selectAgent(conversationId: string, agentName: string): Promise<void> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) return;
+    const known = (await this.agents().catch(() => [] as Agent_Info[])).find((a) => a.id === agentName || a.name === agentName);
+    if (!known || known.mode === 'subagent') {
+      conv.warnings.push({ code: 'AGENT_NOT_REGISTERED', params: { agent: agentName, provider: 'opencode' } });
+      return;
     }
-    const providerID = this.opts.defaultProviderId;
-    if (!providerID) return null;
-    return { providerID, modelID: model };
+    await this.json('POST', sessionPath('session.switchAgent', conv.sessionId), { agent: known.id });
+    conv.applied.agent = known.id;
+    conv.params = { ...conv.params, defaultAgent: known.id };
   }
 
-  // ── Conversation lifecycle ────────────────────────────────────────
+  // ── Conversation lifecycle ───────────────────────────────────────
+
+  private directoryOf(params: CreateConversationParams): string {
+    return params.workingDirectory ?? this.opts.defaultCwd ?? process.cwd();
+  }
+
+  /** The conversation's model as a wire reference, its effort as the matching variant. */
+  private resolveModel(params: CreateConversationParams, warnings: ConversationWarning[]): ModelRef | null {
+    const raw = params.model ?? this.opts.defaultModel;
+    const ref = parseModelRef(raw);
+    if (raw && !ref) {
+      warnings.push({ code: 'FIELD_COERCED', params: { field: 'model', value: raw, reason: 'not a providerID/modelID id; the server default model runs' } });
+      return null;
+    }
+    if (ref && params.reasoningEffort) {
+      const info = this.modelInfo(raw);
+      if (info && effortVariants(info).includes(params.reasoningEffort)) ref.variant = params.reasoningEffort;
+      else warnings.push({ code: 'FIELD_COERCED', params: { field: 'reasoningEffort', value: params.reasoningEffort, reason: 'the model has no variant of that name' } });
+    }
+    return ref;
+  }
+
+  /** Warnings for fields OpenCode 2 has no way to take. */
+  private unsupportedWarnings(params: CreateConversationParams): ConversationWarning[] {
+    const out: ConversationWarning[] = [];
+    const unsupported = (field: string, reason: string): void => {
+      out.push({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: { field, provider: 'opencode', reason } });
+    };
+    if (params.systemMessage?.mode === 'replace') {
+      out.push({ code: 'FIELD_COERCED', params: { field: 'systemMessage.mode', value: 'replace', reason: "OpenCode's base prompt cannot be replaced per session; the text is appended" } });
+    }
+    if (params.customAgents?.length) unsupported('customAgents', 'OpenCode agents are configuration (agent files), not session state');
+    if (params.maxTurns != null) unsupported('maxTurns', "OpenCode's step limit is agent configuration");
+    if (params.provider) unsupported('provider', "OpenCode's providers and keys are its own configuration");
+    if (params.excludedTools?.length || params.availableTools?.length || params.excludedBuiltinTools?.length) {
+      unsupported('excludedTools', 'tool lists are not session state in OpenCode');
+    }
+    if (params.contextTier === 'long_context') unsupported('contextTier', 'no context tiers in OpenCode');
+    if (params.plugins?.length) unsupported('plugins', 'OpenCode plugins are configuration');
+    if (!this.ownsServer) {
+      if (params.skillDirectories?.length) unsupported('skillDirectories', "an external OpenCode server's own configuration decides its skills");
+      if (params.autoCompact) unsupported('autoCompact', "an external OpenCode server's own configuration decides its compaction");
+    }
+    return out;
+  }
+
+  private ruleset(conv: ConversationState, mode: HarnessPermissionMode | undefined): PermissionRule[] {
+    const p = conv.params;
+    return sessionRules({
+      mode,
+      additionalDirectories: p.additionalDirectories,
+      ...(p.disabledSkills ? { disabledSkills: p.disabledSkills } : {}),
+      ...(p.skills ? { skills: p.skills } : {}),
+      remembered: conv.remembered,
+    });
+  }
 
   async createConversation(params: CreateConversationParams): Promise<string> {
-    const warnings: ConversationWarning[] = [];
-    const rawModel = params.model ?? this.opts.defaultModel;
-    const model = this.parseModelRef(rawModel);
-    if (rawModel && !model) {
-      // Silently running on the server default is how a user's model choice
-      // disappears without trace. Say so.
-      warnings.push({
-        code: 'FIELD_COERCED',
-        params: {
-          field: 'model',
-          value: rawModel,
-          reason: 'unqualified model id and no defaultProviderId configured',
-        },
-      });
-    }
-
-    // The chat's primary mount. A session has a single project `directory`;
-    // the other mounts and the managed workspace root are granted through the
-    // session's own permission ruleset (`external_directory` → allow), set on
-    // create and re-set on every rebind.
-    const directory = params.workingDirectory ?? this.opts.defaultCwd;
-    const permission = externalDirectoryRules(params.additionalDirectories);
-    // The server process is shared by every conversation and is spawned before
-    // any of them exists, so per-conversation variables cannot reach it.
-    if (params.env && Object.keys(params.env).length > 0) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { field: 'env', provider: 'opencode', reason: 'shared server process' },
-      });
-    }
-
-    warnings.push(...autoCompactWarnings(params));
-
-    let sessionId: string;
-    if (params.resumeProviderSessionId) {
-      // W12 — rejoin the existing server-side session rather than starting the
-      // model over with no memory of the chat.
-      sessionId = params.resumeProviderSessionId;
-      const resp = await this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.get'].path, { sessionID: sessionId }),
-        undefined,
-        directory,
-      );
-      await resp.arrayBuffer().catch(() => undefined);
-      if (!resp.ok) {
-        throw new Error(
-          `OpenCodeProvider: cannot resume session "${sessionId}" (HTTP ${resp.status}).`,
-        );
-      }
-      await this.setSessionPermission(sessionId, permission, directory, warnings);
-    } else {
-      // `POST /session` accepts only `{ parentID?, title? }`. Sending `model`
-      // or `systemPrompt` here — as the previous version did — is silently
-      // ignored; both belong on each prompt instead.
-      const resp = await this.fetch(
-        OPENCODE_OPERATIONS['session.create'].path,
-        { method: 'POST', body: JSON.stringify({ title: params.conversationId, ...(permission.length ? { permission } : {}) }) },
-        directory,
-      );
-      if (!resp.ok) {
-        throw new Error(`OpenCodeProvider: POST /session failed with ${resp.status}`);
-      }
-      const session = await resp.json() as OpenCodeSession;
-      sessionId = session.id;
-    }
-
-    this.conversations.set(params.conversationId, {
-      sessionId,
+    await this.ensureReady();
+    await this.loadCatalog().catch(() => undefined);
+    const warnings: ConversationWarning[] = [...this.unsupportedWarnings(params)];
+    const model = this.resolveModel(params, warnings);
+    const directory = this.directoryOf(params);
+    const conv: ConversationState = {
+      id: params.conversationId,
+      sessionId: '',
       params,
-      model,
-      system: this.extractSystemPrompt(params),
       directory,
-      listeners: new Set(),
+      listeners: this.conversations.get(params.conversationId)?.listeners ?? new Set(),
       warnings,
       turn: null,
-      compacting: null,
+      compaction: null,
       autoCompacting: false,
-    });
-    this.sessionIndex.set(sessionId, params.conversationId);
+      remembered: [],
+      mode: params.permissionMode,
+      applied: {},
+    };
+    const mode = params.permissionMode;
+    const rules = this.ruleset(conv, mode);
+    const metadata = { [OWNER_METADATA_KEY]: params.conversationId };
+    const agent = await this.agentFor(params, warnings);
+
+    if (params.resumeProviderSessionId) {
+      // W12 — rejoin the session; its history is durable in OpenCode's database.
+      const sessionId = params.resumeProviderSessionId;
+      let info: Session_Info;
+      try {
+        info = (await this.json<{ data: Session_Info }>('GET', sessionPath('session.get', sessionId))).data;
+      } catch (err) {
+        throw err instanceof OpenCodeHttpError && err.status === 404
+          ? new Error(`OpenCodeProvider: cannot resume session "${sessionId}": OpenCode no longer has it.`)
+          : err;
+      }
+      conv.sessionId = sessionId;
+      await this.json('PATCH', sessionPath('session.update', sessionId), { metadata: { ...(info.metadata ?? {}), ...metadata }, permissions: rules });
+      conv.applied.rules = JSON.stringify(rules);
+      if (info.location?.directory && path.resolve(info.location.directory) !== path.resolve(directory)) {
+        await this.json('POST', sessionPath('session.move', sessionId), { directory });
+      }
+      conv.applied.model = modelKey(info.model);
+      conv.applied.agent = info.agent;
+      if (model && conv.applied.model !== modelKey(model)) {
+        await this.json('POST', sessionPath('session.switchModel', sessionId), { model });
+        conv.applied.model = modelKey(model);
+      }
+      if (agent && conv.applied.agent !== agent) {
+        await this.json('POST', sessionPath('session.switchAgent', sessionId), { agent });
+        conv.applied.agent = agent;
+      }
+    } else {
+      const created = await this.json<{ data: Session_Info }>('POST', OPS['session.create'].path, {
+        title: params.conversationId,
+        location: { directory },
+        ...(model ? { model } : {}),
+        ...(agent ? { agent } : {}),
+        metadata,
+        permissions: rules,
+      });
+      conv.sessionId = created.data.id;
+      conv.applied = { rules: JSON.stringify(rules), ...(model ? { model: modelKey(model) } : {}), ...(agent ? { agent } : {}) };
+    }
+
+    const previous = this.conversations.get(params.conversationId);
+    if (previous && previous.sessionId !== conv.sessionId) this.sessions.delete(previous.sessionId);
+    this.conversations.set(params.conversationId, conv);
+    this.sessions.set(conv.sessionId, { conversationId: params.conversationId });
+    if (params.autoCompact) this.autoCompact = params.autoCompact;
+    await this.applySessionState(conv, mode, warnings);
     return params.conversationId;
+  }
+
+  /** The OpenCode agent the conversation names, when it names one OpenCode has. */
+  private async agentFor(params: CreateConversationParams, warnings: ConversationWarning[]): Promise<string | undefined> {
+    if (!params.defaultAgent) return undefined;
+    const known = (await this.agents().catch(() => [] as Agent_Info[])).find((a) => a.id === params.defaultAgent || a.name === params.defaultAgent);
+    if (known && known.mode !== 'subagent') return known.id;
+    warnings.push({ code: 'AGENT_NOT_REGISTERED', params: { agent: params.defaultAgent, provider: 'opencode' } });
+    return undefined;
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
@@ -629,57 +790,146 @@ export class OpenCodeProvider implements IAgentHarness {
       if (params) await this.createConversation(params);
       return;
     }
-    if (!params || live.turn || live.compacting) return;
-    // "Edit sources" on a live chat (D-137) rebinds with new roots and a new
-    // `[Workspace]` system prompt. The system prompt and model ride on every
-    // prompt, so they take effect from the stored state; the extra directories
-    // are the session's permission ruleset, re-set in place. A session's
-    // project directory cannot move, so a new working directory needs a new
-    // session there — reported as CONVERSATION_RESTARTED so the caller hands
-    // it the transcript.
-    const directory = params.workingDirectory ?? this.opts.defaultCwd;
-    if (directory !== live.directory) {
-      this.sessionIndex.delete(live.sessionId);
-      this.conversations.delete(conversationId);
-      await this.createConversation({ ...params, resumeProviderSessionId: undefined });
-      const fresh = this.conversations.get(conversationId);
-      fresh?.warnings.push({
-        code: 'CONVERSATION_RESTARTED',
-        params: { provider: 'opencode', reason: 'working directory moved' },
-      });
-      return;
+    if (!params || live.turn || live.compaction) return;
+    // "Edit sources" (D-137) and setting changes rebind a live chat: the next turn re-sends whatever changed. A new
+    // working directory moves the session there (`POST /move`), history and all.
+    await this.ensureReady();
+    const warnings = [...this.unsupportedWarnings(params)];
+    const directory = this.directoryOf(params);
+    if (path.resolve(directory) !== path.resolve(live.directory)) {
+      await this.json('POST', sessionPath('session.move', live.sessionId), { directory });
+      const old = live.directory;
+      live.directory = directory;
+      live.applied.mcp = undefined;
+      if (![...this.conversations.values()].some((c) => c.directory === old)) this.mcp?.release(old);
     }
-    const warnings: ConversationWarning[] = [...autoCompactWarnings(params)];
-    const model = this.parseModelRef(params.model ?? this.opts.defaultModel);
-    await this.setSessionPermission(live.sessionId, externalDirectoryRules(params.additionalDirectories), directory, warnings);
     live.params = params;
-    live.system = this.extractSystemPrompt(params);
-    if (model) live.model = model;
+    const model = this.resolveModel(params, warnings);
+    if (model && live.applied.model !== modelKey(model)) {
+      await this.json('POST', sessionPath('session.switchModel', live.sessionId), { model });
+      live.applied.model = modelKey(model);
+    }
+    if (params.autoCompact) this.autoCompact = params.autoCompact;
     live.warnings = warnings;
+    await this.applySessionState(live, params.permissionMode, warnings);
   }
 
-  /** `PATCH /session/{id}` with the session's permission ruleset; a failure is a warning, never a failed turn. */
-  private async setSessionPermission(
-    sessionId: string,
-    permission: PermissionRule[],
-    directory: string | undefined,
+  /**
+   * Bring the session's state up to what the conversation (and this turn's mode) asks for. Permission rules are
+   * mandatory — a session whose rules could not be set never runs a turn. Everything else degrades to a warning.
+   */
+  private async applySessionState(
+    conv: ConversationState,
+    mode: HarnessPermissionMode | undefined,
     warnings: ConversationWarning[],
   ): Promise<void> {
-    if (permission.length === 0) return;
-    try {
-      const resp = await this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.update'].path, { sessionID: sessionId }),
-        { method: 'PATCH', body: JSON.stringify({ permission }) },
-        directory,
-      );
-      await resp.arrayBuffer().catch(() => undefined);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    } catch (err) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { field: 'additionalDirectories', provider: 'opencode', reason: String(err) },
+    const sid = conv.sessionId;
+    const rules = this.ruleset(conv, mode);
+    const rulesKey = JSON.stringify(rules);
+    if (conv.applied.rules !== rulesKey) {
+      await this.json('PATCH', sessionPath('session.update', sid), { permissions: rules });
+      conv.applied.rules = rulesKey;
+    }
+    conv.mode = mode;
+
+    const soft = async (field: string, fn: () => Promise<void>): Promise<void> => {
+      try { await fn(); } catch (err) {
+        warnings.push({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: { field, provider: 'opencode', reason: err instanceof Error ? err.message : String(err) } });
+      }
+    };
+
+    // System prompt: an instruction entry, rendered after OpenCode's own instructions (experimental route).
+    const text = conv.params.systemMessage?.content ?? conv.params.systemPromptAppend ?? null;
+    if ((conv.applied.instructions ?? null) !== text) {
+      await soft('systemMessage', async () => {
+        const p = route(OPS['experimental.session.instructions.entry.put'].path, { sessionID: sid, key: INSTRUCTION_KEY });
+        if (text) await this.json('PUT', p, { value: text });
+        else if (conv.applied.instructions) await this.json('DELETE', p);
+        conv.applied.instructions = text;
       });
     }
+
+    // Environment for the session's shell commands. Replaces `process.env` there, so it is the full child env.
+    const env = buildHarnessEnv({ extra: { ...this.opts.env, ...(conv.params.env ?? {}) } });
+    const envKey = JSON.stringify(env);
+    if (conv.applied.env !== envKey) {
+      await soft('env', async () => {
+        await this.json('PUT', sessionPath('session.environment', sid), { variables: env });
+        conv.applied.env = envKey;
+      });
+    }
+
+    // MCP servers: added at runtime on the conversation's location (shared by the sessions there).
+    const servers = Object.entries(conv.params.mcpServers ?? {}).filter(([, s]) => s.enabled !== false);
+    const mcpKey = JSON.stringify([conv.directory, servers]);
+    if (conv.applied.mcp !== mcpKey) {
+      const loc = this.locationQuery(conv.directory);
+      for (const [name, server] of servers) {
+        const config = toOpenCodeMcp(server);
+        if (!config) {
+          warnings.push({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: { field: `mcpServers.${name}`, provider: 'opencode', reason: `transport "${server.type}" needs a command or url` } });
+          continue;
+        }
+        if (server.tools?.length) {
+          warnings.push({ code: 'FIELD_COERCED', params: { field: `mcpServers.${name}.tools`, value: server.tools.join(','), reason: 'OpenCode lists every tool the server offers' } });
+        }
+        try {
+          await this.json('PUT', `${route(OPS['experimental.mcp.add'].path, { server: mcpName(name) })}?${loc}`, { config });
+        } catch (err) {
+          warnings.push({ code: 'MCP_SERVER_FAILED', params: { server: name, reason: err instanceof Error ? err.message : String(err) } });
+        }
+      }
+      conv.applied.mcp = mcpKey;
+    }
+
+    // Host tools: the location's client-hosted MCP lists the union of its conversations' tools.
+    if (conv.params.tools?.length || this.toolsAt(conv.directory).length) {
+      await soft('tools', async () => { await this.mcp?.sync(conv.directory); });
+    }
+
+    this.writeManagedConfigAndReload();
+  }
+
+  /** Every host tool the conversations at `directory` registered. */
+  private toolsAt(directory: string): ToolDefinition[] {
+    const out: ToolDefinition[] = [];
+    for (const conv of this.conversations.values()) {
+      if (conv.directory === directory) out.push(...(conv.params.tools ?? []));
+    }
+    return out;
+  }
+
+  private resolveHostTool(sessionID: string | undefined, tool: string): { def: ToolDefinition } | { error: string } {
+    const entry = sessionID ? this.sessions.get(sessionID) : undefined;
+    const conv = entry ? this.conversations.get(entry.conversationId) : undefined;
+    if (!conv) return { error: `Tool "${tool}" belongs to another client's session.` };
+    const def = conv.params.tools?.find((t) => t.name === tool);
+    return def ? { def } : { error: `Tool "${tool}" is not available in this conversation.` };
+  }
+
+  /** The managed config: the app's compaction setting and the union of the live conversations' skill directories. */
+  private writeManagedConfig(): boolean {
+    if (!this.ownsServer) return false;
+    const skillDirectories = new Set<string>();
+    for (const conv of this.conversations.values()) for (const d of conv.params.skillDirectories ?? []) skillDirectories.add(d);
+    const content = renderConfig({ ...(this.autoCompact ? { autoCompact: this.autoCompact } : {}), skillDirectories: [...skillDirectories] });
+    try {
+      const changed = writeConfig(this.configFile, content, this.configContent);
+      this.configContent = content;
+      return changed;
+    } catch (err) {
+      this.opts.logger?.warn?.(`[OpenCodeProvider] could not write ${this.configFile}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /** Write the config and, when nothing is waiting on a gate, have the server rebuild its locations from it now. */
+  private writeManagedConfigAndReload(): void {
+    if (!this.writeManagedConfig() || !this.server) return;
+    // A reload cancels pending permission requests and forms, so it waits for a quiet moment; the server's own
+    // watcher picks the file up either way.
+    if ([...this.conversations.values()].some((c) => c.turn || c.compaction)) return;
+    void this.json('POST', OPS['location.reload'].path).catch(() => undefined);
   }
 
   hasLiveConversation(conversationId: string): boolean {
@@ -695,25 +945,42 @@ export class OpenCodeProvider implements IAgentHarness {
     return ids[ids.length - 1] ?? null;
   }
 
-  /** W12 — OpenCode sessions are server-side, so they survive a runtime recycle. */
+  /** W12 — sessions are durable in OpenCode's database, so they survive a restart of either side. */
   getProviderSessionId(conversationId: string): string | undefined {
     return this.conversations.get(conversationId)?.sessionId;
   }
 
+  async providerSessionExists(providerSessionId: string): Promise<boolean> {
+    try {
+      await this.ensureReady();
+      await this.json('GET', sessionPath('session.get', providerSessionId));
+      return true;
+    } catch (err) {
+      if (err instanceof OpenCodeHttpError && err.status === 404) return false;
+      throw err;
+    }
+  }
+
+  async deleteProviderSession(providerSessionId: string): Promise<void> {
+    try {
+      await this.ensureReady();
+      await this.json('DELETE', sessionPath('session.remove', providerSessionId));
+    } catch { /* best effort */ }
+  }
+
   async deleteConversation(conversationId: string): Promise<void> {
     const conv = this.conversations.get(conversationId);
-    if (conv) {
-      try {
-        const resp = await this.fetch(
-          this.route(OPENCODE_OPERATIONS['session.delete'].path, { sessionID: conv.sessionId }),
-          { method: 'DELETE' },
-          conv.directory,
-        );
-        await resp.arrayBuffer().catch(() => undefined);
-      } catch { /* best effort */ }
-      this.sessionIndex.delete(conv.sessionId);
-      this.conversations.delete(conversationId);
-    }
+    if (!conv) return;
+    if (conv.turn || conv.compaction) await this.abortConversation(conversationId);
+    try { await this.json('DELETE', sessionPath('session.remove', conv.sessionId)); } catch { /* best effort */ }
+    this.forget(conv);
+  }
+
+  private forget(conv: ConversationState): void {
+    for (const [sid, entry] of this.sessions) if (entry.conversationId === conv.id) this.sessions.delete(sid);
+    this.conversations.delete(conv.id);
+    if (![...this.conversations.values()].some((c) => c.directory === conv.directory)) this.mcp?.release(conv.directory);
+    else void this.mcp?.sync(conv.directory);
   }
 
   async destroyConversation(conversationId: string): Promise<void> {
@@ -724,48 +991,78 @@ export class OpenCodeProvider implements IAgentHarness {
     return this.conversations.get(conversationId)?.warnings ?? [];
   }
 
-  async selectAgent(conversationId: string, agentName: string): Promise<void> {
-    // OpenCode takes the agent per prompt rather than as session state, so this
-    // records the choice and every later prompt carries it.
-    const conv = this.conversations.get(conversationId);
-    if (!conv) return;
-    conv.params = { ...conv.params, defaultAgent: agentName };
+  // ── Fork and rewind ──────────────────────────────────────────────
+
+  /** Every message of a session, oldest first. */
+  private async allMessages(sessionId: string): Promise<Session_Message_Info[]> {
+    const out: Session_Message_Info[] = [];
+    let cursor: string | null | undefined;
+    for (let page = 0; page < 1_000; page++) {
+      const q = cursor ? `cursor=${encodeURIComponent(cursor)}` : 'order=asc';
+      const res = await this.json<SessionMessagesResponse>('GET', `${sessionPath('session.message.list', sessionId)}?limit=200&${q}`);
+      out.push(...(res.data ?? []));
+      cursor = res.cursor?.next;
+      if (!cursor || (res.data ?? []).length === 0) break;
+    }
+    return out;
   }
 
-  async listAgents(_conversationId: string): Promise<HarnessAgentInfo[]> {
-    try {
-      // `GET /agent` is a real route returning the configured agents (build,
-      // plan, explore, general, …). Returning `[]` unconditionally, as the
-      // previous version did, hid every one of them.
-      const resp = await this.fetch(OPENCODE_OPERATIONS['app.agents'].path);
-      if (!resp.ok) return [];
-      const agents = await resp.json() as OpenCodeAgent[];
-      return agents.map((a) => ({
-        name: a.name,
-        description: a.description ?? undefined,
-        model: a.model ? `${a.model.providerID}/${a.model.modelID}` : undefined,
-        source: 'opencode',
-      }));
-    } catch { return []; }
+  /** The first message AFTER `anchorId` (the boundary a fork copies before, a revert drops from), or null when it is last. */
+  private static boundaryAfter(messages: Session_Message_Info[], anchorId: string): string | null {
+    const i = messages.findIndex((m) => m.id === anchorId);
+    if (i < 0) throw new Error(`OpenCodeProvider: message "${anchorId}" is not in the session's history.`);
+    return messages[i + 1]?.id ?? null;
+  }
+
+  async forkConversation(conversationId: string, options: ForkConversationOptions): Promise<ForkConversationResult> {
+    await this.ensureReady();
+    const source = this.conversations.get(conversationId)?.sessionId ?? options.sourceProviderSessionId;
+    if (!source) throw new Error(`OpenCodeProvider: no OpenCode session for conversation "${conversationId}"`);
+    const messages = await this.allMessages(source);
+    const before = options.throughAnchor ? OpenCodeProvider.boundaryAfter(messages, options.throughAnchor.id) : null;
+    const forked = (await this.json<{ data: Session_Info }>('POST', sessionPath('session.fork', source), before ? { before } : {})).data;
+    // OpenCode re-keys the copied messages (`<event id>_<seq>`), in order: map each old id to its copy.
+    const copied = before ? messages.slice(0, messages.findIndex((m) => m.id === before)) : messages;
+    const copies = await this.allMessages(forked.id);
+    const anchorMap: Record<string, string> = {};
+    copied.forEach((m, i) => { const c = copies[i]; if (c && c.id !== m.id) anchorMap[m.id] = c.id; });
+    // The fork inherits the source's metadata and rules; bind it as the new conversation's own.
+    await this.createConversation({ ...options.params, conversationId: options.newConversationId, resumeProviderSessionId: forked.id });
+    return { providerSessionId: forked.id, ...(Object.keys(anchorMap).length ? { anchorMap } : {}) };
+  }
+
+  async rewindConversation(conversationId: string, options: RewindConversationOptions): Promise<ForkConversationResult> {
+    await this.ensureReady();
+    const live = this.conversations.get(conversationId);
+    const sessionId = live?.sessionId ?? options.providerSessionId;
+    if (!sessionId) throw new Error(`OpenCodeProvider: no OpenCode session for conversation "${conversationId}"`);
+    if (live?.turn || live?.compaction) throw new Error(`OpenCodeProvider: conversation "${conversationId}" has a turn in flight`);
+    const messages = await this.allMessages(sessionId);
+    const boundary = options.keepThrough ? OpenCodeProvider.boundaryAfter(messages, options.keepThrough.id) : (messages[0]?.id ?? null);
+    if (boundary) {
+      // Files are the caller's business (workspace checkpoints): only the transcript moves.
+      await this.json('POST', sessionPath('session.revert.stage', sessionId), { messageID: boundary, files: false });
+      await this.json('POST', sessionPath('session.revert.commit', sessionId));
+    }
+    if (live) await this.resumeConversation(conversationId, options.params);
+    else await this.createConversation({ ...options.params, resumeProviderSessionId: sessionId });
+    return { providerSessionId: sessionId };
   }
 
   // ── Messaging ────────────────────────────────────────────────────
 
-  async sendPrompt(
-    conversationId: string,
-    prompt: string,
-    attachments?: AttachmentRef[],
-    options?: SendPromptOptions,
-  ): Promise<void> {
-    // Fire-and-forget, but never un-caught: `sendPromptAndWait` rejects on
-    // several paths and an unhandled rejection can kill the process outright.
-    void this.sendPromptAndWait(conversationId, prompt, attachments, undefined, options)
-      .catch((err: unknown) => {
-        const conv = this.conversations.get(conversationId);
-        const message = err instanceof Error ? err.message : String(err);
-        if (conv) this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'opencode' } });
-        this.opts.logger?.warn?.(`[OpenCodeProvider] sendPrompt("${conversationId}") failed: ${message}`);
-      });
+  async sendPrompt(conversationId: string, prompt: string, attachments?: AttachmentRef[], options?: SendPromptOptions): Promise<void> {
+    void this.sendPromptAndWait(conversationId, prompt, attachments, undefined, options).catch((err: unknown) => {
+      const conv = this.conversations.get(conversationId);
+      const message = err instanceof Error ? err.message : String(err);
+      if (conv) this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'opencode' } });
+      this.opts.logger?.warn?.(`[OpenCodeProvider] sendPrompt("${conversationId}") failed: ${message}`);
+    });
+  }
+
+  /** The mode a turn runs under: the turn's explicit mode, a plan turn's `plan`, else the conversation's. */
+  private turnMode(conv: ConversationState, options: SendPromptOptions | undefined): HarnessPermissionMode | undefined {
+    return options?.permissionMode ?? (options?.agentMode === 'plan' ? 'plan' : conv.params.permissionMode);
   }
 
   async sendPromptAndWait(
@@ -777,342 +1074,200 @@ export class OpenCodeProvider implements IAgentHarness {
   ): Promise<ConversationResponse> {
     const conv = this.conversations.get(conversationId);
     if (!conv) throw new Error(`OpenCodeProvider: no conversation "${conversationId}"`);
-    if (conv.turn || conv.compacting) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
+    if (conv.turn || conv.compaction) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
 
-    // The stream must be live BEFORE the prompt is posted, or the first tokens
-    // are emitted into a subscription that does not exist yet.
-    await this.ensureEventStream();
-
-    let settleTurn!: (outcome: 'done' | 'cancelled') => void;
-    let failTurn!: (err: Error) => void;
-    const completion = new Promise<'done' | 'cancelled'>((resolve, reject) => {
-      settleTurn = resolve;
-      failTurn = reject;
-    });
-    // Observed here rather than awaited raw, so the stream's outcome can be
-    // inspected after the fact without an unhandled rejection when the HTTP
-    // side is the one that settles the turn.
-    let streamOutcome: 'done' | 'cancelled' | null = null;
-    let streamError: Error | null = null;
-    const streamSettled = completion.then(
-      (o) => { streamOutcome = o; },
-      (e: unknown) => { streamError = e instanceof Error ? e : new Error(String(e)); },
-    );
-
+    let finish!: (o: TurnOutcome) => void;
+    const done = new Promise<TurnOutcome>((resolve) => { finish = resolve; });
     const turn: TurnState = {
-      settle: (outcome) => { if (!turn.settled) { turn.settled = true; settleTurn(outcome); } },
-      fail: (err) => { if (!turn.settled) { turn.settled = true; failTurn(err); } },
-      text: '',
-      partText: new Map(),
-      openTools: new Set(),
-      assistantMessageId: null,
+      posted: false,
+      started: false,
       settled: false,
-      terminalEmitted: false,
+      finish: (o) => {
+        if (turn.settled) return;
+        turn.settled = true;
+        clearTimeout(turn.interruptTimer);
+        finish(o);
+      },
+      done,
+      text: '',
+      stepText: new Map(),
+      reasoning: new Map(),
+      openTools: new Map(),
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     };
     conv.turn = turn;
-
-    // Keep the handler so it can be REMOVED. A caller that reuses one
-    // long-lived AbortSignal (a whole workflow run, say) accumulates one
-    // listener per turn otherwise — and `once: true` does not help, because
-    // the listener that never fires is the one that never leaves.
     const onAbort = (): void => { void this.abortConversation(conversationId); };
     signal?.addEventListener('abort', onAbort, { once: true });
-
     let turnTimer: ReturnType<typeof setTimeout> | undefined;
+    let startCheck: ReturnType<typeof setTimeout> | undefined;
     try {
       if (signal?.aborted) {
-        this.emitTerminal(conv, turn, 'cancelled');
+        this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } });
         return { content: '' };
       }
+      await this.ensureReady();
+      const warnings: ConversationWarning[] = [];
+      await this.applySessionState(conv, this.turnMode(conv, options), warnings);
+      if (warnings.length) conv.warnings.push(...warnings);
+      if (turn.settled) return this.conclude(conv, turn, await done);
 
       if (this.turnTimeoutMs > 0) {
-        turnTimer = setTimeout(
-          () => turn.fail(new Error(
-            `OpenCodeProvider: turn did not finish within ${this.turnTimeoutMs} ms`,
-          )),
-          this.turnTimeoutMs,
-        );
+        turnTimer = setTimeout(() => turn.finish({ kind: 'failed', error: new Error(`OpenCodeProvider: turn did not finish within ${this.turnTimeoutMs} ms`) }), this.turnTimeoutMs);
         turnTimer.unref?.();
       }
-
-      const body = {
-        parts: [
-          { type: 'text', text: prompt },
-          ...this.buildFileParts(attachments),
-        ],
-        ...(conv.model ? { model: conv.model } : {}),
-        ...(conv.system ? { system: conv.system } : {}),
-        ...(this.agentFor(conv, options) ? { agent: this.agentFor(conv, options) } : {}),
-      };
-
-      // `POST /session/{id}/message` returns a single JSON body when the turn
-      // is over — it is NOT a stream (see OPENCODE_OPERATIONS). Streaming comes
-      // from the shared `/event` subscription opened above. Both are used: the
-      // stream drives token/tool events, the response is the authoritative
-      // final message.
-      //
-      // The two arrive in EITHER order. On loopback the HTTP response
-      // consistently lands first, and tearing the turn down on it — as the
-      // first version of this rewrite did — discarded every event still in
-      // flight, so a turn that streamed perfectly well emitted no tokens at
-      // all. So the request is started, not awaited, and both sides are then
-      // given a bounded chance to arrive.
-      const httpSettled = this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.prompt'].path, { sessionID: conv.sessionId }),
-        { method: 'POST', body: JSON.stringify(body) },
-        conv.directory,
-      ).then(
-        (resp) => ({ ok: true as const, resp }),
-        (err: unknown) => ({ ok: false as const, err }),
-      );
-
-      // Whichever side reports first ends the turn; the other then gets a short
-      // grace period to catch up.
-      await Promise.race([httpSettled, streamSettled]);
-      await this.withGrace(streamSettled);
-      const http = await this.withGrace(httpSettled);
-
-      if (streamError) throw streamError;
-
-      let final: { info?: AssistantMessage; parts?: OpenCodePart[] } = {};
-      if (http) {
-        if (!http.ok) throw http.err instanceof Error ? http.err : new Error(String(http.err));
-        if (!http.resp.ok) {
-          const detail = await http.resp.text().catch(() => '');
-          throw new Error(
-            `OpenCodeProvider: POST prompt failed with ${http.resp.status}` +
-            (detail ? `: ${detail.slice(0, 500)}` : ''),
-          );
-        }
-        final = await http.resp.json().catch(() => ({})) as typeof final;
+      const files = toFileAttachments(attachments);
+      turn.posted = true;
+      try {
+        await this.json('POST', sessionPath('session.prompt', conv.sessionId), { text: prompt, ...(files.length ? { files } : {}) });
+      } catch (err) {
+        turn.finish({ kind: 'failed', error: err instanceof Error ? err : new Error(String(err)) });
       }
-
-      const finishReason = (final.info as unknown as { finish?: string } | undefined)?.finish
-        ?? (streamOutcome === 'cancelled' ? 'aborted' : undefined);
-      // Prefer the streamed text when the HTTP body carried none: an aborted or
-      // errored turn answers with no parts, and the partial the user already
-      // saw is the honest result.
-      const text = this.textOf(final.parts) || turn.text;
-
-      if (finishReason === 'length') {
-        // W13/B1 — truncation: fail every tool call still open so the model is
-        // never told work completed that did not.
-        this.failOpenTools(conv, turn, 'the response was truncated (finish: length)');
-      }
-      if (finishReason === 'aborted') {
-        this.emitTerminal(conv, turn, 'cancelled');
-        return { content: text };
-      }
-
-      this.emitTerminal(conv, turn, 'idle');
-      return { content: text };
+      // A prompt admitted while the session was already running joins that run (OpenCode steers it in) and sees no
+      // `execution.started` of its own.
+      startCheck = setTimeout(() => {
+        if (turn.started || turn.settled) return;
+        void this.json<{ data: Record<string, unknown> }>('GET', OPS['session.active'].path)
+          .then((r) => { if (r.data && conv.sessionId in r.data) turn.started = true; })
+          .catch(() => undefined);
+      }, START_CHECK_MS);
+      startCheck.unref?.();
+      return this.conclude(conv, turn, await done);
     } catch (err) {
       if (signal?.aborted) {
-        this.emitTerminal(conv, turn, 'cancelled');
+        this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } });
         return { content: turn.text };
       }
       throw err;
     } finally {
-      if (turnTimer) clearTimeout(turnTimer);
+      clearTimeout(turnTimer);
+      clearTimeout(startCheck);
       signal?.removeEventListener('abort', onAbort);
       turn.settled = true;
-      conv.turn = null;
+      clearTimeout(turn.interruptTimer);
+      if (conv.turn === turn) conv.turn = null;
     }
   }
 
-  /**
-   * Broadcast a turn's terminal event exactly once.
-   *
-   * Both the event stream and the prompt response report the same ending, and
-   * either may arrive first, so every terminal emission funnels through here.
-   */
-  private emitTerminal(
-    conv: ConversationState,
-    turn: TurnState,
-    kind: 'idle' | 'cancelled',
-  ): void {
-    if (turn.terminalEmitted) return;
-    turn.terminalEmitted = true;
-    this.broadcast(
-      conv,
-      kind === 'cancelled'
-        ? { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } }
-        : { kind: 'harness.idle', data: {} },
-    );
-  }
-
-  /**
-   * Await `promise`, but give up after the settle grace and return null.
-   *
-   * Used to let the slower of {HTTP response, event stream} catch up without
-   * letting either one hang a turn: a lost `session.idle` costs one grace
-   * period, not the whole conversation.
-   */
-  private async withGrace<T>(promise: Promise<T>): Promise<T | null> {
-    const ms = this.opts.settleGraceMs ?? DEFAULT_SETTLE_GRACE_MS;
-    if (ms <= 0) return promise;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), ms);
-          timer.unref?.();
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** Which agent to run this turn under, if any. */
-  private agentFor(conv: ConversationState, _options: SendPromptOptions | undefined): string | undefined {
-    return conv.params.defaultAgent;
-  }
-
-  /** File attachments become `FilePartInput` parts. */
-  private buildFileParts(attachments?: AttachmentRef[]): Array<Record<string, unknown>> {
-    const parts: Array<Record<string, unknown>> = [];
-    for (const att of attachments ?? []) {
-      if (att.type !== 'file' || !att.path) continue;
-      // Attachments used to be accepted and dropped entirely.
-      parts.push({
-        type: 'file',
-        // `file://` is how the OpenAPI document's FilePartInput addresses a
-        // path on the server's own filesystem.
-        url: att.path.startsWith('file://') ? att.path : `file://${att.path}`,
-        filename: att.displayName ?? att.path.split(/[\\/]/).pop() ?? att.path,
-        mime: 'application/octet-stream',
+  /** Report the turn's end once, and resolve (or reject) the caller. */
+  private conclude(conv: ConversationState, turn: TurnState, outcome: TurnOutcome): ConversationResponse {
+    if (turn.usage.input + turn.usage.output + turn.usage.cacheRead + turn.usage.cacheWrite > 0 || turn.usage.cost > 0) {
+      this.broadcast(conv, {
+        kind: 'harness.usage',
+        data: {
+          model: turn.model ?? conv.params.model ?? 'unknown',
+          inputTokens: turn.usage.input,
+          outputTokens: turn.usage.output,
+          cacheReadTokens: turn.usage.cacheRead,
+          cacheWriteTokens: turn.usage.cacheWrite,
+          costUsd: turn.usage.cost,
+          provider: 'opencode',
+        },
       });
     }
-    return parts;
-  }
-
-  /** Concatenate the text parts of a finished message. */
-  private textOf(parts: OpenCodePart[] | undefined): string {
-    let out = '';
-    for (const part of parts ?? []) {
-      if ((part as { type?: string }).type === 'text') {
-        out += (part as { text?: string }).text ?? '';
-      }
+    if (outcome.kind === 'failed') {
+      this.failOpenTools(conv, turn, outcome.error.message);
+      this.broadcast(conv, { kind: 'harness.error', data: { message: outcome.error.message, provider: 'opencode' } });
+      throw outcome.error;
     }
-    return out;
+    if (outcome.kind === 'cancelled') {
+      this.failOpenTools(conv, turn, 'the turn was stopped');
+      this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } });
+      return { content: turn.text };
+    }
+    this.failOpenTools(conv, turn, 'the turn ended before the tool reported a result');
+    this.broadcast(conv, { kind: 'harness.idle', data: {} });
+    return { content: turn.text };
   }
 
   async getMessages(conversationId: string): Promise<ConversationMessage[]> {
     const conv = this.conversations.get(conversationId);
     if (!conv) return [];
     try {
-      // `GET /session/{id}/message` is a real route. The previous version
-      // returned `[]` unconditionally.
-      const resp = await this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.messages'].path, { sessionID: conv.sessionId }),
-        undefined,
-        conv.directory,
-      );
-      if (!resp.ok) return [];
-      const rows = await resp.json() as Array<{ info?: { role?: string }; parts?: OpenCodePart[] }>;
-      return rows.map((row) => ({
-        role: (row.info?.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-        content: this.textOf(row.parts),
-      }));
+      const out: ConversationMessage[] = [];
+      for (const m of await this.allMessages(conv.sessionId)) {
+        if (m.type === 'user') out.push({ role: 'user', content: m.text, timestamp: new Date(m.time.created) });
+        else if (m.type === 'assistant') {
+          const content = m.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('');
+          if (content) out.push({ role: 'assistant', content, timestamp: new Date(m.time.created) });
+        }
+      }
+      return out;
     } catch { return []; }
   }
 
   async abortConversation(conversationId: string): Promise<void> {
     const conv = this.conversations.get(conversationId);
-    if (conv?.compacting && !conv.turn) {
-      // A compaction is a server-side run of the session like a prompt: abort stops it there, and the summarize
-      // request is cancelled here so `compactConversation` settles at once.
-      const compaction = conv.compacting;
-      await this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.abort'].path, { sessionID: conv.sessionId }),
-        { method: 'POST' },
-        conv.directory,
-      ).then((r) => r.arrayBuffer()).catch(() => undefined);
-      compaction.abort.abort();
-      return;
-    }
-    if (!conv || !conv.turn) return;
+    if (!conv) return;
+    const turn = conv.turn;
+    const compaction = conv.compaction;
+    if (!turn && !compaction) return;
+    if (compaction) compaction.cancelled = true;
     try {
-      const resp = await this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.abort'].path, { sessionID: conv.sessionId }),
-        { method: 'POST' },
-        conv.directory,
-      );
-      await resp.arrayBuffer().catch(() => undefined);
-    } catch { /* best effort */ }
-    // Settle locally too: waiting for the server to confirm is what left a
-    // stopped conversation permanently "in flight" if the abort was lost.
-    conv.turn.settle('cancelled');
+      await this.json('POST', sessionPath('session.interrupt', conv.sessionId));
+    } catch { /* settled locally below */ }
+    // The server confirms with `session.execution.interrupted`; settle locally if it does not, so a lost
+    // confirmation never leaves the conversation stuck "in flight".
+    if (turn && !turn.settled) {
+      turn.interruptTimer = setTimeout(() => turn.finish({ kind: 'cancelled' }), INTERRUPT_SETTLE_MS);
+      turn.interruptTimer.unref?.();
+    }
+    if (compaction && !compaction.settled) {
+      const t = setTimeout(() => this.settleCompaction(conv, 'cancelled'), INTERRUPT_SETTLE_MS);
+      t.unref?.();
+    }
   }
 
-  // ── Compaction ────────────────────────────────────────────────────
+  // ── Compaction ───────────────────────────────────────────────────
 
   /**
-   * `POST /session/{id}/summarize` — OpenCode summarises the session with the given model and continues it from the
-   * summary; the request returns when that is done. It takes no instructions. The summary streams as an assistant
-   * message on the event stream; with no turn in flight here those parts are not forwarded as the agent's reply.
+   * `POST /api/session/{id}/compact` — admitted at once, run at the next safe point; finished when
+   * `session.compaction.ended` (the summary is its `text`) and the run's execution terminal have arrived.
    */
   async compactConversation(conversationId: string, _options?: CompactConversationOptions): Promise<void> {
     const conv = this.conversations.get(conversationId);
     if (!conv) throw new Error(`OpenCodeProvider: no conversation "${conversationId}"`);
-    if (conv.turn || conv.compacting) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
-    const compaction: CompactionState = { abort: new AbortController(), boundaryEmitted: false };
-    conv.compacting = compaction;
+    if (conv.turn || conv.compaction) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
+    await this.ensureReady();
+    const finished = new Promise<void>((resolve, reject) => {
+      conv.compaction = { settled: false, resolve, reject, cancelled: false, ended: false };
+    });
     this.broadcastCompaction(conv, COMPACTION_INFO.start, 'manual');
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.ensureEventStream();
-      const model = conv.model ?? (await this.serverDefaultModel());
-      if (!model) throw new Error('OpenCodeProvider: no model to summarise with (the session has none and the server names no default).');
-      // The summary is a model call over the whole session: bounded by the turn ceiling, not the 30 s request one.
-      const signal = this.turnTimeoutMs > 0
-        ? AbortSignal.any([compaction.abort.signal, AbortSignal.timeout(this.turnTimeoutMs)])
-        : compaction.abort.signal;
-      const resp = await this.fetch(
-        this.route(OPENCODE_OPERATIONS['session.summarize'].path, { sessionID: conv.sessionId }),
-        { method: 'POST', body: JSON.stringify({ providerID: model.providerID, modelID: model.modelID }), signal },
-        conv.directory,
-      );
-      const detail = await resp.text().catch(() => '');
-      if (!resp.ok) throw new Error(`OpenCodeProvider: summarize failed with ${resp.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`);
-      if (detail.trim() === 'false') throw new Error('OpenCodeProvider: OpenCode did not summarise the session.');
-      if (!compaction.boundaryEmitted) {
-        compaction.boundaryEmitted = true;
-        this.broadcastCompaction(conv, COMPACTION_INFO.boundary, 'manual');
+      await this.json('POST', sessionPath('session.compact', conv.sessionId), {});
+      if (this.turnTimeoutMs > 0) {
+        timer = setTimeout(() => this.settleCompaction(conv, new Error(`OpenCodeProvider: compaction did not finish within ${this.turnTimeoutMs} ms`)), this.turnTimeoutMs);
+        timer.unref?.();
       }
-      conv.lastCompactedAt = Date.now();
-      this.broadcast(conv, { kind: 'harness.idle', data: {} });
     } catch (err) {
-      const stopped = compaction.abort.signal.aborted;
-      const message = stopped ? 'Compaction stopped' : err instanceof Error ? err.message : String(err);
-      this.broadcastCompaction(conv, COMPACTION_INFO.failed, 'manual', message);
-      this.broadcast(
-        conv,
-        stopped
-          ? { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } }
-          : { kind: 'harness.idle', data: {} },
-      );
-      throw stopped ? new Error(message) : err;
+      this.settleCompaction(conv, err instanceof Error ? err : new Error(String(err)));
+    }
+    try {
+      await finished;
     } finally {
-      conv.compacting = null;
+      clearTimeout(timer);
+      conv.compaction = null;
     }
   }
 
-  /** The server's default model (`GET /config/providers` → `default`), for a session created without one. */
-  private async serverDefaultModel(): Promise<ModelRef | null> {
-    const fromOpts = this.parseModelRef(this.opts.defaultModel);
-    if (fromOpts) return fromOpts;
-    try {
-      const resp = await this.fetch(OPENCODE_OPERATIONS['config.providers'].path);
-      if (!resp.ok) return null;
-      const body = await resp.json() as { default?: Record<string, string> };
-      const preferred = this.opts.defaultProviderId;
-      const entry = (preferred && body.default?.[preferred] ? [preferred, body.default[preferred]] : Object.entries(body.default ?? {})[0]) as
-        | [string, string]
-        | undefined;
-      return entry ? { providerID: entry[0], modelID: entry[1] } : null;
-    } catch { return null; }
+  /** End our compaction: `null` = it compacted, `'cancelled'` = stopped, an Error = it failed. */
+  private settleCompaction(conv: ConversationState, result: null | 'cancelled' | Error): void {
+    const c = conv.compaction;
+    if (!c || c.settled) return;
+    c.settled = true;
+    clearTimeout(c.graceTimer);
+    if (result === null) {
+      this.broadcast(conv, { kind: 'harness.idle', data: {} });
+      c.resolve();
+    } else if (result === 'cancelled' || c.cancelled) {
+      this.broadcastCompaction(conv, COMPACTION_INFO.failed, 'manual', 'Compaction stopped');
+      this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } });
+      c.reject(new Error('Compaction stopped'));
+    } else {
+      this.broadcastCompaction(conv, COMPACTION_INFO.failed, 'manual', result.message);
+      this.broadcast(conv, { kind: 'harness.idle', data: {} });
+      c.reject(result);
+    }
   }
 
   private broadcastCompaction(
@@ -1120,447 +1275,403 @@ export class OpenCodeProvider implements IAgentHarness {
     infoType: (typeof COMPACTION_INFO)[keyof typeof COMPACTION_INFO],
     trigger: CompactionTrigger,
     error?: string,
+    summary?: string,
   ): void {
+    const preTokens = infoType === COMPACTION_INFO.boundary && conv.lastContextTokens && conv.lastContextTokens > 0 ? conv.lastContextTokens : undefined;
     const message =
       infoType === COMPACTION_INFO.start
         ? 'Compacting conversation…'
         : infoType === COMPACTION_INFO.failed
           ? `Compaction failed${error ? `: ${error}` : ''}`
-          : describeCompaction({ trigger });
+          : describeCompaction({ trigger, ...(preTokens ? { preTokens } : {}) });
     this.broadcast(conv, {
       kind: 'harness.session_info',
-      data: { infoType, message, trigger, provider: 'opencode', ...(error ? { error } : {}) },
+      data: {
+        infoType,
+        message,
+        trigger,
+        provider: 'opencode',
+        ...(error ? { error } : {}),
+        ...(summary ? { summary } : {}),
+        ...(preTokens ? { preTokens } : {}),
+      },
     });
   }
 
-  // ── Events ────────────────────────────────────────────────────────
+  private onCompaction(conv: ConversationState, type: string, d: Record<string, unknown>): void {
+    const trigger: CompactionTrigger = d['reason'] === 'manual' ? 'manual' : 'auto';
+    const ours = trigger === 'manual' ? conv.compaction : null;
+    if (type === 'session.compaction.started') {
+      if (ours) return; // announced when it was requested
+      if (conv.autoCompacting) return;
+      conv.autoCompacting = true;
+      this.broadcastCompaction(conv, COMPACTION_INFO.start, trigger);
+      return;
+    }
+    if (type === 'session.compaction.ended') {
+      const summary = typeof d['text'] === 'string' && d['text'] ? d['text'] : undefined;
+      this.broadcastCompaction(conv, COMPACTION_INFO.boundary, trigger, undefined, summary);
+      conv.autoCompacting = false;
+      // The gauge's next figure comes with the next step; until then the old one would lie.
+      conv.lastContextTokens = undefined;
+      if (ours && !ours.settled) {
+        ours.ended = true;
+        // Wait for the run's terminal so it cannot be mistaken for the next turn's; bounded.
+        ours.graceTimer = setTimeout(() => this.settleCompaction(conv, null), INTERRUPT_SETTLE_MS);
+        ours.graceTimer.unref?.();
+      }
+      return;
+    }
+    // failed
+    const error = structuredErrorMessage(d['error'] as Session_StructuredError | undefined, 'OpenCode could not compact the conversation');
+    conv.autoCompacting = false;
+    if (ours && !ours.settled) {
+      this.settleCompaction(conv, ours.cancelled ? 'cancelled' : new Error(error));
+      return;
+    }
+    this.broadcastCompaction(conv, COMPACTION_INFO.failed, trigger, error);
+  }
 
-  onConversationEvent(
-    conversationId: string,
-    handler: Listener<AgentEvent>,
-  ): UnsubFn {
+  // ── Events ───────────────────────────────────────────────────────
+
+  onConversationEvent(conversationId: string, handler: Listener<AgentEvent>): UnsubFn {
     const conv = this.conversations.get(conversationId);
     if (!conv) return () => { /* noop */ };
     conv.listeners.add(handler);
     return () => conv.listeners.delete(handler);
   }
 
-  // ── Shared event stream ───────────────────────────────────────────
-
-  private async ensureEventStream(): Promise<void> {
-    if (!this.streamReady) await this.openEventStream();
-    else await this.streamReady;
-  }
-
-  /**
-   * Open the server-wide SSE subscription and demultiplex it by session.
-   *
-   * One connection for the whole provider, not one per turn: `/event` is a
-   * server-wide stream, so opening it per turn would deliver every other
-   * session's traffic to every turn and multiply the connection count by the
-   * number of active conversations.
-   */
-  private async openEventStream(): Promise<void> {
-    if (this.closed) return;
-    const abort = new AbortController();
-    this.streamAbort = abort;
-
-    let markReady!: () => void;
-    let markFailed!: (err: Error) => void;
-    this.streamReady = new Promise<void>((resolve, reject) => {
-      markReady = resolve;
-      markFailed = reject;
-    });
-
-    // The stream request carries its own long-lived signal, so it opts out of
-    // the blanket request deadline in `fetch`. That leaves the CONNECT
-    // unbounded: a server that accepts the socket and never sends response
-    // headers would hang `initialize()` — which sits on the harness bring-up
-    // path — forever. Bound the connect explicitly; once headers arrive,
-    // `sseTimeoutMs` governs the body.
-    let connected = false;
-    const connectTimer = setTimeout(() => {
-      if (!connected) abort.abort();
-    }, this.requestTimeoutMs);
-    connectTimer.unref?.();
-
-    const run = async (): Promise<void> => {
-      let resp: Response;
-      try {
-        resp = await this.fetch(OPENCODE_OPERATIONS['event.subscribe'].path, {
-          signal: abort.signal,
-          headers: { Accept: 'text/event-stream' },
-        });
-      } catch (err) {
-        throw abort.signal.aborted && !connected
-          ? new Error(
-              `OpenCodeProvider: GET /event did not answer within ` +
-              `${this.requestTimeoutMs} ms.`,
-            )
-          : err;
-      } finally {
-        clearTimeout(connectTimer);
-      }
-      if (!resp.ok || !resp.body) {
-        throw new Error(`OpenCodeProvider: GET /event failed with ${resp.status}`);
-      }
-      connected = true;
-      markReady();
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      try {
-        for (;;) {
-          const { done, value } = await this.readWithIdleTimeout(reader);
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-          for (const line of lines) {
-            if (!line.startsWith('data:')) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === '[DONE]') continue;
-            try {
-              this.dispatchEvent(JSON.parse(payload) as OpenCodeEvent);
-            } catch { /* skip malformed frames */ }
-          }
-        }
-      } finally {
-        // Both closes the body and releases the lock, so the connection is
-        // actually returned rather than dangling.
-        await reader.cancel().catch(() => { /* already closed */ });
-      }
-    };
-
-    run().catch((err: unknown) => {
-      clearTimeout(connectTimer);
-      // An abort BEFORE the stream connected is the connect deadline firing,
-      // which is a real failure the caller must hear about; an abort after is
-      // our own shutdown.
-      if ((abort.signal.aborted && connected) || this.closed) return;
-      const message = err instanceof Error ? err.message : String(err);
-      markFailed(err instanceof Error ? err : new Error(message));
-      this.streamReady = null;
-      // A dropped stream means no turn can ever complete, so say so loudly and
-      // fail whatever is waiting rather than hanging forever.
-      for (const h of this.clientEventListeners) {
-        h({ type: 'client.error', data: { message: `OpenCode event stream lost: ${message}` } });
-      }
-      this.failAllTurns(new Error(`OpenCodeProvider: event stream lost: ${message}`));
-    });
-
-    // Surface an immediate connection failure to the caller of initialize();
-    // a later drop is reported through `client.error` above.
-    await this.streamReady;
-  }
-
-  /**
-   * `reader.read()` with an idle deadline.
-   *
-   * A server that accepts the connection and then goes quiet would otherwise
-   * leave every turn awaiting a read that never settles. OpenCode sends
-   * periodic `server.heartbeat` frames, so silence really does mean trouble.
-   */
-  private async readWithIdleTimeout(
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-  ): Promise<Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>> {
-    if (this.sseTimeoutMs <= 0) return reader.read();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(
-              `OpenCodeProvider: no SSE frame for ${this.sseTimeoutMs} ms — stream abandoned`,
-            )),
-            this.sseTimeoutMs,
-          );
-          timer.unref?.();
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
+  private broadcast(conv: ConversationState, event: AgentEvent): void {
+    for (const h of conv.listeners) {
+      try { h(event); } catch { /* a listener's bug is not the stream's */ }
     }
   }
 
-  /** Route one stream event to the conversation that owns its session. */
-  private dispatchEvent(event: OpenCodeEvent): void {
-    const type = (event as { type?: string }).type;
-    const props = (event as { properties?: Record<string, unknown> }).properties ?? {};
-    const sessionId = props['sessionID'];
-    if (typeof sessionId !== 'string') return;
-
-    const conversationId = this.sessionIndex.get(sessionId);
-    if (!conversationId) return;
-    const conv = this.conversations.get(conversationId);
-    if (!conv) return;
-
-    // Compaction is reported whether or not a turn is in flight: OpenCode compacts on its own when a prompt overflows
-    // the window, and the v2 events arrive for a summarize of ours too.
-    if (type === 'session.compacted' || type === 'session.next.compaction.started' || type === 'session.next.compaction.ended') {
-      this.handleCompactionEvent(conv, type, props);
-      return;
-    }
-
-    const turn = conv.turn;
-    if (!turn) return;
-
-    switch (type) {
-      case 'message.updated': {
-        const info = props['info'] as { id?: string; role?: string } | undefined;
-        // Remember which message is the assistant's reply so parts belonging to
-        // the echoed user message are not streamed back as model output.
-        if (info?.role === 'assistant' && typeof info.id === 'string') {
-          turn.assistantMessageId = info.id;
-        }
-        break;
+  private dispatch(frame: OpenCodeFrame): void {
+    const d = frame.data;
+    switch (frame.type) {
+      case 'permission.asked':
+        void this.onPermission(d as unknown as PermissionAsked);
+        return;
+      case 'form.created':
+        void this.onForm((d['form'] ?? {}) as FormInfo);
+        return;
+      case 'session.created': {
+        const parent = typeof d['parentID'] === 'string' ? d['parentID'] : undefined;
+        const sid = typeof d['sessionID'] === 'string' ? d['sessionID'] : undefined;
+        const owner = parent ? this.sessions.get(parent) : undefined;
+        if (sid && owner) this.sessions.set(sid, { conversationId: owner.conversationId, parentSessionId: parent });
+        return;
       }
-
-      case 'message.part.updated': {
-        const part = props['part'] as Record<string, unknown> | undefined;
-        if (!part) break;
-        if (turn.assistantMessageId && part['messageID'] !== turn.assistantMessageId) break;
-        this.handlePart(conv, turn, part);
-        break;
-      }
-
-      case 'session.error': {
-        const error = props['error'] as { name?: string; data?: { message?: string } } | undefined;
-        const name = error?.name ?? 'UnknownError';
-        const message = error?.data?.message ?? name;
-        if (ABORT_ERRORS.has(name)) {
-          this.emitTerminal(conv, turn, 'cancelled');
-          turn.settle('cancelled');
-          break;
-        }
-        if (TRUNCATION_ERRORS.has(name)) {
-          this.failOpenTools(conv, turn, `the response was truncated (${name})`);
-          this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'opencode' } });
-          turn.settle('done');
-          break;
-        }
-        this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'opencode' } });
-        turn.fail(new Error(message));
-        break;
-      }
-
-      case 'session.idle':
-        turn.settle('done');
-        break;
-
       default:
         break;
     }
-  }
+    const sid = typeof d['sessionID'] === 'string' ? d['sessionID'] : undefined;
+    const entry = sid ? this.sessions.get(sid) : undefined;
+    if (!sid || !entry) return;
+    const conv = this.conversations.get(entry.conversationId);
+    if (!conv) return;
+    const child = entry.parentSessionId !== undefined;
 
-  /** `session.compacted` / `session.next.compaction.*` → the shared compaction events (docs/compaction). */
-  private handleCompactionEvent(conv: ConversationState, type: string, props: Record<string, unknown>): void {
-    const ours = conv.compacting;
-    if (type === 'session.next.compaction.started') {
-      // Ours already announced its start; the provider's own (auto, overflow) is announced here.
-      if (ours || conv.autoCompacting) return;
-      conv.autoCompacting = true;
-      this.broadcastCompaction(conv, COMPACTION_INFO.start, 'auto');
+    if (frame.type.startsWith('session.compaction.')) {
+      if (!child) this.onCompaction(conv, frame.type, d);
       return;
     }
-    if (ours) {
-      if (ours.boundaryEmitted) return;
-      ours.boundaryEmitted = true;
-      conv.lastCompactedAt = Date.now();
-      const summary = type === 'session.next.compaction.ended' && typeof props['text'] === 'string' ? props['text'] : undefined;
-      this.broadcast(conv, {
-        kind: 'harness.session_info',
-        data: { infoType: COMPACTION_INFO.boundary, message: describeCompaction({ trigger: 'manual' }), trigger: 'manual', provider: 'opencode', ...(summary ? { summary } : {}) },
-      });
+    if (frame.type.startsWith('session.execution.')) {
+      if (child) return;
+      this.onExecution(conv, frame.type, d);
       return;
     }
-    // The provider's own. `session.compacted` (v1) and `session.next.compaction.ended` (v2) describe the same end:
-    // whichever comes first reports it.
-    const summary = type === 'session.next.compaction.ended' && typeof props['text'] === 'string' ? props['text'] : undefined;
-    if (type === 'session.compacted' || type === 'session.next.compaction.ended') {
-      if (!conv.autoCompacting && conv.lastCompactedAt != null && Date.now() - conv.lastCompactedAt < 5_000) return;
-      conv.autoCompacting = false;
-      conv.lastCompactedAt = Date.now();
-      this.broadcast(conv, {
-        kind: 'harness.session_info',
-        data: { infoType: COMPACTION_INFO.boundary, message: describeCompaction({ trigger: 'auto' }), trigger: 'auto', provider: 'opencode', ...(summary ? { summary } : {}) },
-      });
-    }
-  }
+    const turn = conv.turn;
+    if (!turn || !turn.posted || turn.settled) return;
+    const amid = typeof d['assistantMessageID'] === 'string' ? d['assistantMessageID'] : '';
+    const callKey = `${amid}:${String(d['id'] ?? '')}`;
+    const parentToolCallId = child ? entry.parentToolCallId : undefined;
 
-  /**
-   * Turn one part update into harness events.
-   *
-   * `part.text` is CUMULATIVE — each update carries the whole text so far — so
-   * a delta is the suffix beyond what we last saw for that part id. Emitting
-   * the field verbatim would replay the entire message on every frame.
-   */
-  private handlePart(conv: ConversationState, turn: TurnState, part: Record<string, unknown>): void {
-    const partId = typeof part['id'] === 'string' ? part['id'] : '';
-    const type = part['type'];
-
-    if (type === 'text') {
-      const full = typeof part['text'] === 'string' ? part['text'] : '';
-      const seen = turn.partText.get(partId) ?? '';
-      if (full.length > seen.length && full.startsWith(seen)) {
-        const delta = full.slice(seen.length);
-        turn.partText.set(partId, full);
+    switch (frame.type) {
+      case 'session.step.started': {
+        const model = d['model'] as ModelRef | undefined;
+        if (!child && model) turn.model = qualifiedModelId(model);
+        return;
+      }
+      case 'session.text.delta': {
+        if (child) return; // a subagent's prose is its own; the parent reports what it learned
+        const delta = typeof d['delta'] === 'string' ? d['delta'] : '';
+        if (!delta) return;
         turn.text += delta;
+        turn.stepText.set(amid, (turn.stepText.get(amid) ?? '') + delta);
         this.broadcast(conv, { kind: 'harness.token', data: { text: delta } });
-      } else if (full !== seen) {
-        // A rewritten part (a retry, a correction): replace rather than append,
-        // and do not emit a token for text the client has already been shown.
-        turn.partText.set(partId, full);
+        return;
+      }
+      case 'session.reasoning.delta': {
+        if (child) return;
+        const delta = typeof d['delta'] === 'string' ? d['delta'] : '';
+        if (!delta) return;
+        const k = `${amid}:${String(d['ordinal'] ?? 0)}`;
+        turn.reasoning.set(k, (turn.reasoning.get(k) ?? '') + delta);
+        this.broadcast(conv, { kind: 'harness.reasoning_delta', data: { text: delta } });
+        return;
+      }
+      case 'session.reasoning.ended': {
+        if (child) return;
+        const k = `${amid}:${String(d['ordinal'] ?? 0)}`;
+        const text = typeof d['text'] === 'string' ? d['text'] : (turn.reasoning.get(k) ?? '');
+        turn.reasoning.delete(k);
+        if (text.trim()) this.broadcast(conv, { kind: 'harness.reasoning_complete', data: { content: text } });
+        return;
+      }
+      case 'session.tool.input.started': {
+        const name = typeof d['name'] === 'string' ? d['name'] : 'tool';
+        this.toolNames.set(callKey, name);
+        if (this.toolNames.size > 10_000) this.toolNames.delete(this.toolNames.keys().next().value as string);
+        return;
+      }
+      case 'session.tool.called': {
+        if (turn.openTools.has(callKey)) return;
+        const tool = displayToolName(this.toolNames.get(callKey) ?? 'tool');
+        turn.openTools.set(callKey, { tool, ...(parentToolCallId ? { parentToolCallId } : {}) });
+        this.broadcast(conv, {
+          kind: 'harness.tool_start',
+          data: { tool, args: d['input'] ?? {}, callId: callKey, ...(parentToolCallId ? { parentToolCallId } : {}) },
+        });
+        return;
+      }
+      case 'session.tool.progress': {
+        // A subagent call reports its child session in its progress metadata: link the child's calls to it.
+        const meta = d['metadata'] as Record<string, unknown> | undefined;
+        const childSid = typeof meta?.['sessionID'] === 'string' ? meta['sessionID'] : undefined;
+        const childEntry = childSid ? this.sessions.get(childSid) : undefined;
+        if (childEntry && childEntry.conversationId === conv.id && !childEntry.parentToolCallId) childEntry.parentToolCallId = callKey;
+        return;
+      }
+      case 'session.tool.success':
+      case 'session.tool.failed': {
+        const open = turn.openTools.get(callKey);
+        const tool = open?.tool ?? displayToolName(this.toolNames.get(callKey) ?? 'tool');
+        turn.openTools.delete(callKey);
+        this.toolNames.delete(callKey);
+        const success = frame.type === 'session.tool.success';
+        const text = toolContentText(d['content'] as Tool_Content[] | undefined);
+        const result = success ? text : [structuredErrorMessage(d['error'] as Session_StructuredError | undefined, 'Tool failed'), text].filter(Boolean).join('\n');
+        this.broadcast(conv, {
+          kind: 'harness.tool_complete',
+          data: { tool, result, callId: callKey, success, ...(parentToolCallId ? { parentToolCallId } : {}) },
+        });
+        return;
+      }
+      case 'session.step.ended': {
+        if (child) return;
+        const tokens = d['tokens'] as TokenUsage_Info | undefined;
+        if (tokens) {
+          turn.usage.input += tokens.input;
+          turn.usage.output += tokens.output + (tokens.reasoning ?? 0);
+          turn.usage.cacheRead += tokens.cache?.read ?? 0;
+          turn.usage.cacheWrite += tokens.cache?.write ?? 0;
+        }
+        if (typeof d['cost'] === 'number') turn.usage.cost += d['cost'];
+        this.broadcast(conv, {
+          kind: 'harness.message_complete',
+          data: { content: turn.stepText.get(amid) ?? '', providerMessageId: amid },
+        });
+        turn.stepText.delete(amid);
+        const finishReason = d['finish'];
+        if (finishReason === 'length') {
+          // W13/B1 — a truncated response: fail the calls still open, never report them done.
+          this.failOpenTools(conv, turn, 'the response was truncated (finish: length)');
+        } else if (finishReason === 'content-filter') {
+          this.broadcast(conv, { kind: 'harness.warning', data: { message: 'The model stopped: its output was filtered.', code: 'content_filter', provider: 'opencode' } });
+        }
+        if (tokens) this.emitContextUsage(conv, tokens, turn.model);
+        return;
+      }
+      case 'session.retry.scheduled': {
+        if (child) return;
+        const error = structuredErrorMessage(d['error'] as Session_StructuredError | undefined, 'request failed');
+        this.broadcast(conv, { kind: 'harness.warning', data: { message: `Retrying: ${error}`, code: 'retry', provider: 'opencode' } });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private onExecution(conv: ConversationState, type: string, d: Record<string, unknown>): void {
+    const compaction = conv.compaction;
+    if (compaction && !compaction.settled && !conv.turn) {
+      if (type === 'session.execution.started') return;
+      if (type === 'session.execution.succeeded') { if (compaction.ended) this.settleCompaction(conv, null); return; }
+      if (type === 'session.execution.interrupted') { this.settleCompaction(conv, 'cancelled'); return; }
+      if (type === 'session.execution.failed') {
+        this.settleCompaction(conv, new Error(structuredErrorMessage(d['error'] as Session_StructuredError | undefined, 'compaction failed')));
       }
       return;
     }
-
-    if (type === 'tool') {
-      const state = part['state'] as { status?: string; input?: unknown; output?: string; error?: string } | undefined;
-      const callId = typeof part['callID'] === 'string' ? part['callID'] : partId;
-      const tool = typeof part['tool'] === 'string' ? part['tool'] : 'tool';
-      switch (state?.status) {
-        case 'running':
-          if (!turn.openTools.has(callId)) {
-            turn.openTools.add(callId);
-            this.broadcast(conv, {
-              kind: 'harness.tool_start',
-              data: { tool, args: state.input ?? {}, callId },
-            });
-          }
-          break;
-        case 'completed':
-          // Emitted whether or not a `running` frame was seen: a fast tool can
-          // go straight to `completed`, and swallowing its result because no
-          // start was observed loses the tool call entirely.
-          turn.openTools.delete(callId);
-          this.broadcast(conv, {
-            kind: 'harness.tool_complete',
-            data: { tool, result: state.output ?? '', callId, success: true },
-          });
-          break;
-        case 'error':
-          turn.openTools.delete(callId);
-          this.broadcast(conv, {
-            kind: 'harness.tool_complete',
-            data: { tool, result: state.error ?? '', callId, success: false },
-          });
-          break;
-        default:
-          break;
+    const turn = conv.turn;
+    if (!turn || !turn.posted || turn.settled) return;
+    if (type === 'session.execution.started') { turn.started = true; return; }
+    if (!turn.started) return; // the end of a run that began before this prompt
+    switch (type) {
+      case 'session.execution.succeeded':
+        turn.finish({ kind: 'done' });
+        return;
+      case 'session.execution.interrupted': {
+        const reason = d['reason'];
+        if (reason === 'shutdown') turn.finish({ kind: 'failed', error: new Error('OpenCodeProvider: the OpenCode server shut down during the turn') });
+        else turn.finish({ kind: 'cancelled' });
+        return;
       }
+      case 'session.execution.failed': {
+        const error = d['error'] as Session_StructuredError | undefined;
+        if (error?.type === 'aborted') { turn.finish({ kind: 'cancelled' }); return; }
+        turn.finish({ kind: 'failed', error: new Error(structuredErrorMessage(error, 'the turn failed')) });
+        return;
+      }
+      default:
+        return;
     }
+  }
+
+  /** The gauge: what the last request occupied, against the model's window and OpenCode's compaction point. */
+  private emitContextUsage(conv: ConversationState, tokens: TokenUsage_Info, model: string | undefined): void {
+    const current = tokens.input + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0) + tokens.output;
+    if (current <= 0) return;
+    conv.lastContextTokens = current;
+    const info = this.modelInfo(model);
+    const promptTokenLimit = info?.limit?.input ?? info?.limit?.context;
+    const threshold = this.ownsServer ? compactionThreshold(info?.limit?.context, this.autoCompact) : undefined;
+    this.broadcast(conv, {
+      kind: 'harness.context_usage',
+      data: {
+        provider: 'opencode',
+        ...(model ? { model } : {}),
+        source: 'derived',
+        currentTokens: current,
+        ...(promptTokenLimit ? { promptTokenLimit } : {}),
+        ...(info?.limit?.context ? { totalContextWindow: info.limit.context } : {}),
+        ...(threshold ? { compactionThreshold: threshold } : {}),
+        apiUsage: { input: tokens.input, output: tokens.output, cacheRead: tokens.cache?.read ?? 0, cacheWrite: tokens.cache?.write ?? 0 },
+      },
+    });
   }
 
   /** W13/B1 — fail every tool call still open, with the reason. */
   private failOpenTools(conv: ConversationState, turn: TurnState, why: string): void {
-    for (const callId of turn.openTools) {
+    for (const [callId, open] of turn.openTools) {
       this.broadcast(conv, {
         kind: 'harness.tool_complete',
         data: {
-          tool: callId,
-          result:
-            `Tool call cancelled: ${why}. All tool calls in this batch are cancelled. ` +
-            `Please re-issue your request.`,
+          tool: open.tool,
+          result: `Tool call cancelled: ${why}. All tool calls in this batch are cancelled. Please re-issue your request.`,
           callId,
           success: false,
+          ...(open.parentToolCallId ? { parentToolCallId: open.parentToolCallId } : {}),
         },
       });
     }
     turn.openTools.clear();
   }
 
-  private failAllTurns(err: Error): void {
-    for (const conv of this.conversations.values()) conv.turn?.fail(err);
-  }
+  // ── Gates ────────────────────────────────────────────────────────
 
-  // ── Private helpers ───────────────────────────────────────────────
-
-  private broadcast(conv: ConversationState, event: AgentEvent): void {
-    for (const h of conv.listeners) h(event);
-  }
-
-  /** Substitute `{sessionID}`-style parameters into a generated path template. */
-  private route(template: string, params: Record<string, string>): string {
-    return template.replace(/\{(\w+)\}/g, (whole, key: string) =>
-      params[key] === undefined ? whole : encodeURIComponent(params[key]!),
-    );
-  }
-
-  private extractSystemPrompt(params: CreateConversationParams): string | undefined {
-    // `systemMessage` is a `SystemMessageConfig` ({ mode, content }); the wire
-    // carries a single `system` string on each prompt, so `mode` has no
-    // representation and both modes send the same text.
-    return params.systemMessage?.content ?? params.systemPromptAppend;
-  }
-
-  /**
-   * One HTTP call against `opencode serve`.
-   *
-   * `directory` is appended as the `?directory=` query parameter every
-   * endpoint in the pinned OpenAPI document accepts; it is what makes one
-   * shared server usable by chats rooted in different projects.
-   */
-  private async fetch(path: string, init?: RequestInit, directory?: string): Promise<Response> {
-    if (!this.baseUrl) throw new Error('OpenCodeProvider: no base URL — call initialize() first.');
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    if (this.opts.authToken) {
-      // A bare token with no scheme is rejected (or worse, ignored) by every
-      // conformant server. Only add `Bearer ` when the caller has not already
-      // supplied a scheme of their own.
-      headers['Authorization'] = /^\S+\s/.test(this.opts.authToken)
-        ? this.opts.authToken
-        : `Bearer ${this.opts.authToken}`;
+  /** `permission.asked` → the chat's approval gate → `POST …/permission/{id}/reply`. Requests for sessions not ours are left alone. */
+  private async onPermission(asked: PermissionAsked): Promise<void> {
+    const entry = this.sessions.get(asked.sessionID);
+    const conv = entry ? this.conversations.get(entry.conversationId) : undefined;
+    if (!conv) return;
+    let decision: 'once' | 'reject' = 'reject';
+    let message: string | undefined;
+    const handler = conv.params.onPermissionRequest;
+    try {
+      if (handler) {
+        const answer = await handler(toPermissionRequest(asked));
+        decision = answer.granted ? 'once' : 'reject';
+        if (!answer.granted && answer.reason) message = answer.reason;
+        if (answer.granted && answer.remember) {
+          conv.remembered.push(...rememberRules(asked));
+          const rules = this.ruleset(conv, conv.mode);
+          // The asking session (a subagent's, perhaps) and the conversation's own both learn it.
+          for (const sid of new Set([conv.sessionId, asked.sessionID])) {
+            await this.json('PATCH', sessionPath('session.update', sid), { permissions: rules }).catch(() => undefined);
+          }
+          conv.applied.rules = JSON.stringify(rules);
+        }
+      } else {
+        // Nobody to ask: fail closed (a bypass session never asks in the first place).
+        message = 'No one is available to approve this action.';
+      }
+    } catch (err) {
+      message = `The approval could not be obtained: ${err instanceof Error ? err.message : String(err)}`;
     }
-    // The event stream passes its own long-lived `signal` and manages its own
-    // idle deadline; everything else is bounded here, because a hung
-    // `opencode serve` must not be able to stall the caller — least of all
-    // `initialize()`, which sits on the harness bring-up path.
-    const signal = init?.signal ?? AbortSignal.timeout(this.requestTimeoutMs);
-    const url = directory
-      ? `${this.baseUrl}${path}${path.includes('?') ? '&' : '?'}directory=${encodeURIComponent(directory)}`
-      : `${this.baseUrl}${path}`;
-    return globalThis.fetch(url, {
-      ...init,
-      signal,
-      headers: { ...headers, ...((init?.headers ?? {}) as Record<string, string>) },
-    });
+    try {
+      await this.json('POST', sessionPath('session.permission.reply', asked.sessionID, { requestID: asked.id }), {
+        decision,
+        ...(message ? { message } : {}),
+      });
+    } catch (err) {
+      this.opts.logger?.warn?.(`[OpenCodeProvider] permission reply failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** `form.created` → the question card (for the `question` tool) → reply, or a cancel with the reason as feedback. */
+  private async onForm(form: FormInfo): Promise<void> {
+    const entry = form.sessionID ? this.sessions.get(form.sessionID) : undefined;
+    const conv = entry ? this.conversations.get(entry.conversationId) : undefined;
+    if (!conv || !form.id) return;
+    const formPath = sessionPath('session.form.cancel', form.sessionID, { formID: form.id });
+    const cancel = (message: string): Promise<unknown> =>
+      this.json('DELETE', `${formPath}?message=${encodeURIComponent(message)}`).catch(() => undefined);
+
+    const questions = isQuestionForm(form) ? questionsFromForm(form) : null;
+    const gate = conv.params.onQuestionRequest;
+    if (!questions || !gate) {
+      await cancel(
+        !isQuestionForm(form) || !questions
+          ? `GeneratorAI cannot show this form ("${form.title}"). Continue without it.`
+          : 'The user cannot be asked right now. Continue with your best judgement and state the assumption you made.',
+      );
+      return;
+    }
+    try {
+      const response = await gate({ questions });
+      const answer = answerFromResponse(form, response);
+      if (answer) {
+        await this.json('POST', sessionPath('session.form.reply', form.sessionID, { formID: form.id }), { answer });
+      } else {
+        await cancel(response.freeformResponse?.trim() || 'The user dismissed the question without answering.');
+      }
+    } catch (err) {
+      await cancel(`The question could not be shown: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 
-/**
- * OpenCode's automatic compaction is server configuration (`compaction.auto` in opencode.json), shared by every
- * session of the server and fixed before any conversation exists; it has no threshold. The app's setting is
- * reported as not applied rather than silently dropped.
- */
-function autoCompactWarnings(params: CreateConversationParams): ConversationWarning[] {
-  const setting = params.autoCompact;
-  if (!setting || (setting.enabled && setting.thresholdPct == null)) return [];
-  return [{
-    code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-    params: {
-      field: 'autoCompact',
-      provider: 'opencode',
-      reason: "OpenCode's automatic compaction follows its own configuration (compaction.auto in opencode.json)",
-    },
-  }];
+/** Attachments as prompt files: absolute `file://` URIs (OpenCode sniffs the type from the bytes). */
+function toFileAttachments(attachments: AttachmentRef[] | undefined): Array<{ uri: string; name?: string }> {
+  const out: Array<{ uri: string; name?: string }> = [];
+  for (const att of attachments ?? []) {
+    if (att.type !== 'file' || !att.path) continue;
+    const uri = /^(file|data):/i.test(att.path) ? att.path : pathToFileURL(path.resolve(att.path)).href;
+    out.push({ uri, name: att.displayName ?? path.basename(att.path) });
+  }
+  return out;
 }
 
-/**
- * The session rules that open a chat's extra directories (other mounts, the
- * managed root) to OpenCode's file tools: `external_directory` is the
- * permission its tools ask before touching a path outside the session's
- * project directory, and a pattern is matched against the directory itself
- * and everything under it.
- */
-export function externalDirectoryRules(directories: readonly string[] | undefined): PermissionRule[] {
-  return [...new Set(directories ?? [])].flatMap((dir) => [
-    { permission: 'external_directory', pattern: dir, action: 'allow' as const },
-    { permission: 'external_directory', pattern: path.join(dir, '*'), action: 'allow' as const },
-  ]);
+/** The app's MCP server config as OpenCode's, tools listed directly (Code Mode is off in our sessions anyway). */
+function toOpenCodeMcp(server: McpServerConfig): Record<string, unknown> | null {
+  const timeout = server.timeoutMs ? { timeout: { execution: server.timeoutMs } } : {};
+  if (server.type === 'stdio') {
+    if (!server.command) return null;
+    return {
+      type: 'local',
+      command: [server.command, ...(server.args ?? [])],
+      ...(server.cwd ? { cwd: server.cwd } : {}),
+      ...(server.env ? { environment: server.env } : {}),
+      codemode: false,
+      ...timeout,
+    };
+  }
+  if (!server.url) return null;
+  return { type: 'remote', url: server.url, ...(server.headers ? { headers: server.headers } : {}), codemode: false, ...timeout };
 }
+
+export { OpenCodeVersionError };

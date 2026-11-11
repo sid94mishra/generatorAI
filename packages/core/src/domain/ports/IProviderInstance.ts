@@ -34,7 +34,7 @@ export type ProviderWireProtocol =
   | 'claude-agent-sdk'
   | 'copilot-sdk'
   | 'codex-rpc'      // W37 — future
-  | 'opencode-http'  // W38 — future
+  | 'opencode-http'  // W38 — OpenCode 2's HTTP API
   | 'acp';           // W39 — future
 
 // The level vocabulary lives in @generatorai/shared with the provider table.
@@ -68,10 +68,10 @@ export interface ProviderCapabilities {
   /**
    * How the provider asks before acting (RV-6, PD-17):
    * - `per_call`: every tool call the provider does not auto-allow reaches
-   *   the session's permission gate (Copilot, ACP, claude-agent);
+   *   the session's permission gate (Copilot, ACP, claude-agent, OpenCode);
    * - `exec_and_patch`: only command executions and patch applications ask
    *   (Codex); other tools run under the sandbox policy;
-   * - `none`: the provider never asks (opencode).
+   * - `none`: the provider never asks (no built-in provider since OpenCode 2).
    */
   approvalGating: ApprovalGatingLevel;
   /**
@@ -133,7 +133,7 @@ export interface ProviderCapabilities {
   conversationRewind?: boolean;
   /**
    * Whether `compactConversation` is implemented natively — the provider summarises the history and continues the
-   * same session (Claude `/compact`, Codex `thread/compact/start`, Copilot `history.compact`, OpenCode `summarize`,
+   * same session (Claude `/compact`, Codex `thread/compact/start`, Copilot `history.compact`, OpenCode `compact`,
    * an ACP agent advertising `/compact`). Without it the chat service compacts synthetically: it summarises the
    * transcript and the next prompt starts a fresh provider session from the summary.
    */

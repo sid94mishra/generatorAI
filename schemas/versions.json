@@ -28,13 +28,13 @@
     "opencode": {
       "status": "generated",
       "artifactPath": "schemas/opencode/openapi.json",
-      "version": "1.19.5",
-      "capturedBy": "npx --yes opencode-ai@1.19.5 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json (equivalently: packages/sdk/openapi.json at the opencode v1.19.5 tag with x-codeSamples removed — identical to /doc, checked at 1.18.25)",
+      "version": "2.2.7",
+      "capturedBy": "packages/protocol/openapi.json at the anomalyco/opencode v2.2.7 tag (git show v2.2.7:packages/protocol/openapi.json; sha1 df8d38d2). Equivalently from a running server: OPENCODE_PASSWORD=<pw> opencode serve --stdio --port 0 (reads {\"url\"} from stdout), then curl -u opencode:<pw> <url>/openapi.json",
       "defsPath": "components.schemas",
       "methodTable": "openapi",
       "tableName": "OPENCODE",
       "output": "opencode.generated.ts",
-      "_note": "OpenAPI 3.1: schemas live under components.schemas rather than $defs, and the endpoint table is derived from `paths`. The generated OPENCODE_OPERATIONS table records which routes stream (text/event-stream) and which return JSON — the distinction the previous hand-written stand-in got backwards for POST /session/{sessionID}/message."
+      "_note": "OpenAPI 3.1: schemas live under components.schemas rather than $defs, and the endpoint table is derived from `paths`. OpenCode 2 (`@opencode/cli`): every route sits under /api/*. Schema names are dotted (Session.Message.Assistant, session.text.delta); the event union is V2Event. The generated OPENCODE_OPERATIONS table records which routes stream (text/event-stream) and which return JSON."
     }
   }
 }

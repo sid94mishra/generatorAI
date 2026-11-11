@@ -41,10 +41,12 @@
  *          from that exact binary (`codex app-server generate-json-schema`,
  *          see schemas/versions.json → capturedBy). Re-capture it when the
  *          pin moves; this script only turns the artifact into types.
- * opencode → NOT GENERATED. Requires the OpenAPI 3.1 document served at
- *          `GET /doc` by a running `opencode serve` from a pinned
- *          `opencode-ai`. Not a dependency here, and no `opencode` binary on
- *          PATH.
+ * opencode → GENERATED from a COMMITTED artifact:
+ *          `schemas/opencode/openapi.json` is OpenCode 2.2.7's
+ *          `packages/protocol/openapi.json` (what `opencode serve` serves at
+ *          `GET /openapi.json`; see schemas/versions.json → capturedBy). Its
+ *          dotted schema names (`Session.Message.Assistant`,
+ *          `session.text.delta`) are emitted with `_` for `.`.
  *
  * Neither gap can be closed by this script alone: both need a new pinned
  * dependency plus a build step that executes a third-party binary. Until then
