@@ -168,8 +168,9 @@ describe('claude-agent provider-reported context snapshot', () => {
     const shortened = { ...LIVE_USAGE, maxTokens: 100_000, rawMaxTokens: 100_000, autoCompactThreshold: 67_000, model: 'claude-sonnet-5-5' };
     const d = snapshotFor(shortened, RESULT_MESSAGE, ['claude-sonnet-5-5', { contextWindow: 200_000, maxOutputTokens: 32_000 }])!;
     expect(d['totalContextWindow']).toBe(200_000);
-    // The same budget the result-derived snapshot publishes, so the gauge does not jump between the two.
-    expect(d['promptTokenLimit']).toBe(168_000);
+    // The whole window, as the CLI reports it with no threshold set — not window minus output (168K), which put the
+    // limit below the CLI's own default compaction point and changed with the setting.
+    expect(d['promptTokenLimit']).toBe(200_000);
     expect(d['compactionThreshold']).toBe(67_000);
     // Without a larger window on record the CLI's figure stands.
     expect(snapshotFor(shortened)!['promptTokenLimit']).toBe(100_000);

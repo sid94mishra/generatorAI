@@ -3438,8 +3438,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // With an auto-compaction threshold set (settings.autoCompactWindow) the CLI reports the window it was told
       // to compact within as the context's size: "65k / 100k" for a 200K model. The model's window is what the
       // turn's `result` reported, so the gauge keeps that and the threshold travels as `compactionThreshold`.
+      // The limit is the whole window, as the CLI reports it without a threshold (1M for Sonnet 5.5, compacting at
+      // 967K): window minus max output (872K) put the limit below the CLI's own default compaction point.
       const limits = this.realLimitsWithin(usage.model, usage.rawMaxTokens);
-      const promptTokenLimit = limits ? Math.max(0, limits.contextWindow - (limits.maxOutputTokens ?? 0)) : usage.maxTokens;
+      const promptTokenLimit = limits ? limits.contextWindow : usage.maxTokens;
       const totalContextWindow = limits ? limits.contextWindow : usage.rawMaxTokens;
 
       await this.emitEventToHandlers(conversationId, createAgentEvent('harness.context_usage', {
