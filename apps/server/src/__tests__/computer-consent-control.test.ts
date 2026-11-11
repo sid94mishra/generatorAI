@@ -154,7 +154,8 @@ describe('G-07 consent scope over the routes', () => {
 
     const grants = await request(app).get(`/api/workspaces/${WS}/computer/grants`).expect(200);
     expect(grants.body.grants).toEqual([
-      expect.objectContaining({ appIdentity: '*', appLabel: 'Any app', decision: 'always_allow', scope: 'read' }),
+      // D-188: "Always allow" is stored for every action, keyboard and mouse included.
+      expect.objectContaining({ appIdentity: '*', appLabel: 'Any app', decision: 'always_allow', scope: 'synthetic' }),
     ]);
 
     // A different app: covered by the any-app grant, no new prompt.
