@@ -159,6 +159,7 @@ describe('route policy — mobile device authority', () => {
       '/system',
       '/extensions',
       '/harness',
+      '/acp',
     ]) {
       expect(allowed(mobile, path, 'POST'), `should NOT write ${path}`).toBe(false);
     }

@@ -631,6 +631,16 @@ export class HarnessRegistry {
   }
 
   /**
+   * Make a provider's status stale WITHOUT dropping its catalog cache, so the next refresh re-reads what the
+   * provider already knows. For a provider that reports its own state changes (ACP agents signing in, starting,
+   * stopping): `invalidate` would make every agent re-list its models.
+   */
+  markStale(type: HarnessType): void {
+    const entry = this.entries.get(type);
+    if (entry) delete entry.status.checkedAt;
+  }
+
+  /**
    * Fire-and-forget background refresh.
    * No-op when a refresh is already in flight.
    * Callers that need a fresh snapshot should await `refresh(true)` instead,

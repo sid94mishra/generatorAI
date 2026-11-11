@@ -237,6 +237,8 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/workspaces', read: ['read:workspaces'], write: ['write:workspaces'] },
 
   { prefix: '/harness', read: ['read:status'], write: ['admin:harnesses'], riskLevel: 'high' },
+  // ACP agents (docs/acp): the catalogue is status; installing, enabling and signing agents in is provider admin.
+  { prefix: '/acp', read: ['read:status'], write: ['admin:harnesses'], riskLevel: 'high' },
   { prefix: '/copilot', read: ['read:status'], write: ['admin:harnesses'] },
   { prefix: '/system', read: ['read:status'], write: ['admin:settings'], riskLevel: 'high' },
 

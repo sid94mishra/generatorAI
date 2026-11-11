@@ -146,6 +146,8 @@ export function createHarnessRoutes(container: Container): Router {
           checkedAt: s.checkedAt,
           modelCount: s.models.length,
           models: s.models,
+          // ACP-3 — the agents the `acp` provider drives, one picker entry each.
+          ...(s.subProviders ? { subProviders: s.subProviders } : {}),
           // The provider can sign the user in from the app (see POST
           // /providers/:type/login). Read off the live adapter when it is
           // up; a provider that has not been brought up yet reports false

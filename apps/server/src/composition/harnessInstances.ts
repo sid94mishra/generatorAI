@@ -100,8 +100,6 @@ export async function buildInstanceProviderConfig(
   const cfg = record.config as Record<string, unknown>;
   const readString = (key: string): string | undefined =>
     typeof cfg[key] === 'string' ? (cfg[key] as string) : undefined;
-  const readStringArray = (key: string): string[] | undefined =>
-    Array.isArray(cfg[key]) && cfg[key]!.every((v) => typeof v === 'string') ? (cfg[key] as string[]) : undefined;
 
   switch (type) {
     case 'copilot': {
@@ -187,20 +185,10 @@ export async function buildInstanceProviderConfig(
         },
       };
     }
-    case 'acp': {
-      const command = readString('command');
-      if (!command) return null; // acp.command is required; a row without one can't be started.
-      const apiKey = await resolveCredential(record, 'apiKey', secretStore);
-      return {
-        type,
-        acp: {
-          command,
-          args: readStringArray('args'),
-          defaultCwd: opts.artifactsDir,
-          env: apiKey ? { GENERATORAI_ACP_API_KEY: apiKey } : undefined,
-        },
-      };
-    }
+    case 'acp':
+      // ACP agents are sub-providers of the one `acp` adapter, kept in the ACP store (docs/acp ACP-1, ACP-10:
+      // custom agents included), not separate instances: a harness_instances row cannot describe one.
+      return null;
   }
 }
 

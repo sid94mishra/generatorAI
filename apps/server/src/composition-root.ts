@@ -12,6 +12,8 @@ import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
 import { CompactionSettingsStore, autoCompactFor } from './settings/compaction.js';
 import { ProviderVisibilityStore } from './settings/providerVisibility.js';
 import { CopilotCliService } from './settings/copilotCli.js';
+import { AcpAgentsService } from './settings/acpAgents.js';
+import type { AcpProvider } from '@generatorai/agent-harness-providers';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, resolveOpenCodeCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
@@ -442,9 +444,40 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     logger.info('[Container] OpenCode CLI not found — install OpenCode 2 or set OPENCODE_BIN to enable the OpenCode provider');
   }
 
+  // ACP agents (docs/acp): the registry catalogue, installs under <data>/acp, which agents are enabled and their
+  // env (secret store). The `acp` provider runs the enabled ones; a change reaches it live (setAgents) and the
+  // provider status is re-read (debounced) — never a model re-probe of every agent.
+  let acpRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const acpAgents = await AcpAgentsService.load({
+    dataDir: dirname(resolve(config.dbPath)),
+    secretStore: security.secretStore,
+    provider: async () => (harnessRegistry.isHidden('acp') ? null : ((await harnessRegistry.get('acp')) as unknown as AcpProvider)),
+    peekProvider: () => harnessRegistry.peek('acp') as unknown as AcpProvider | null,
+    onCatalogChange: () => {
+      clearTimeout(acpRefreshTimer);
+      acpRefreshTimer = setTimeout(() => {
+        void (async () => {
+          // Wait out a refresh in flight (it may predate the change), then read the provider again.
+          await harnessRegistry.refresh(false).catch(() => undefined);
+          harnessRegistry.markStale('acp');
+          await harnessRegistry.refresh(false).catch(() => undefined);
+        })();
+      }, 150);
+      acpRefreshTimer.unref?.();
+    },
+    logger: { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
+  });
+
   /** Per-provider construction options, resolved lazily by the registry. */
   const buildHarnessConfig = (type: HarnessType) => ({
     type,
+    // Always configured (ACP-9): with no agent enabled the provider says so instead of being absent.
+    acp: type === 'acp' ? {
+      agents: acpAgents.launches(),
+      defaultCwd: config.artifactsDir,
+      onChange: () => acpAgents.notifyProviderChanged(),
+      logger,
+    } : undefined,
     codex: type === 'codex' && codexCommand ? {
       binaryPath: codexCommand.command,
       args: [...codexCommand.argsPrefix, 'app-server'],
@@ -2619,6 +2652,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     compactionSettings,
     providerVisibility,
     copilotCli,
+    acpAgents,
     streamBroker,
     customToolRegistry,
     mcpHub,
@@ -3156,6 +3190,8 @@ export interface Container {
   providerVisibility: ProviderVisibilityStore;
   /** The Copilot CLI, downloaded on first use. */
   copilotCli: CopilotCliService;
+  /** ACP agents (docs/acp): catalogue, installs, enabled agents and their env, sign-in. */
+  acpAgents: AcpAgentsService;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;

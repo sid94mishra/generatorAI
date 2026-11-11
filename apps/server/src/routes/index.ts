@@ -36,6 +36,7 @@ import { createWorkspaceRoutes } from './workspaces.js';
 import { createFsRoutes } from './fs.js';
 import { createReviewRoutes } from './review.js';
 import { createHarnessRoutes } from './harness.js';
+import { createAcpRoutes } from './acp.js';
 import { createSourceControlRoutes } from './sourceControl.js';
 import { createEditorRoutes } from './editor.js';
 import { createWorkflowScriptRoutes } from './workflowScripts.js';
@@ -162,6 +163,9 @@ export function createApiRouter(container: Container): Router {
 
   // Harness — runtime AI provider switching (PRV-02)
   router.use('/harness', createHarnessRoutes(container));
+
+  // ACP agents (docs/acp) — the ACP Registry catalogue, installs, enable/env, sign-in
+  router.use('/acp', createAcpRoutes(container));
 
   // Workflow Scripts — programmatic workflow creation via .workflow.mjs
   router.use('/workflow-scripts', createWorkflowScriptRoutes(container));

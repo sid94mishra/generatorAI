@@ -17,6 +17,10 @@
     "./claude-agent": {
       "import": "./src/providers/claude-agent/index.ts",
       "types": "./src/providers/claude-agent/index.ts"
+    },
+    "./acp": {
+      "import": "./src/providers/acp/index.ts",
+      "types": "./src/providers/acp/index.ts"
     }
   },
   "files": [
@@ -38,6 +42,10 @@
       "./claude-agent": {
         "types": "./dist/providers/claude-agent/index.d.ts",
         "import": "./dist/providers/claude-agent/index.js"
+      },
+      "./acp": {
+        "types": "./dist/providers/acp/index.d.ts",
+        "import": "./dist/providers/acp/index.js"
       }
     }
   },
