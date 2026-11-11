@@ -64,6 +64,8 @@ function makeApp(registry: unknown) {
     '/api/harness',
     createHarnessRoutes({
       harnessRegistry: registry,
+      // Copilot's on-demand CLI download (its status rides on the copilot row).
+      copilotCli: { state: () => ({ available: true }), install: vi.fn() },
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     } as unknown as Container),
   );
