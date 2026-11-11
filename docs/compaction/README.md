@@ -80,7 +80,9 @@ it in full. Without a summary (Codex, OpenCode v1) it stays as today.
   popover: optional "Focus on…" instructions (when the provider takes them) and **Compact conversation**. Disabled while
   a turn runs. The gauge popover gets the same action.
 - Transcript: a divider row "Conversation compacted · 152K → 21K tokens" (manual / auto), live and after a reload;
-  "Compacting conversation…" while it runs; a failure as a warning step.
+  "Compacting conversation…" while it runs; a failure as a warning step. When the provider exposed the summary,
+  **Summary** on the divider opens it in a dialog (it runs to pages; unfolded in the transcript it pushed the turns
+  after it out of view).
 
 ## 5. Tests
 
@@ -164,3 +166,26 @@ Observed, not changed (owner decisions):
   wave means visiting each worker chat.
 - Claude's auto-compaction threshold is computed from 200K until the first turn reports the model's window, so a
   1M model's first turn compacts earlier than the percentage says.
+
+### 7.2 Interrupted work, handoffs and background agents (2026-11-11, installed builds with the fixes above)
+
+| Run | What | Result |
+|---|---|---|
+| E4 | Sonnet 5.5 adds an audit log; the app is quit and reinstalled mid-turn; the user reopens the chat and says "continue" | after the restart the chat shows "Stopped before the response finished", the partial steps and all 8 changed files; Claude finished the wiring, cleanup and tests and committed; api 126/126, typecheck green; the compliance owner and the retention recalled |
+| E5 | Sonnet builds a per-IP rate limit for the status endpoints → Compact (summary opens in the dialog) → move to Codex for a review → Compact on Codex → the threshold changed while the chat is open → Compact again → reload → back to Claude | 55K → 6K with the summary (dialog: title, summary, "the agent continues from this summary", Escape closes it, nothing unfolds in the transcript); Codex reviewed and found nothing to fix; each Codex compaction wrote **one** row with "from N tokens" (57K, 29K — the 396eabbe fix), the gauge read "compacted" until the next response (dd1c41ef); 3 dividers before and after the reload; the ticket and the owner recalled by Codex and by Claude; api 125/125, typecheck green |
+| E6 | An Opus 5.5 orchestrator spawns a Sonnet worker (version endpoint) and a Codex worker (validation audit); the user asks to stop the Codex worker; the orchestrator reviews and brings in the Sonnet commit; Compact | the orchestrator stopped the worker with `cancel_background_agent` (status cancelled, nothing merged), and stopped its own first spawn that a bound agent had moved to another model; the Sonnet worker's commit fast-forwarded onto the branch; 54K → 4K, the summary in the dialog; the release manager recalled; api 123/123, typecheck green |
+
+Found and fixed on the way:
+
+| Finding | Fix |
+|---|---|
+| The summary unfolded inside the transcript | 726510bf — a dialog |
+| The composer's toolbar wrapped (Compact alone under "+") beside a long model label: it folded effort and context only below a fixed 420 px | fe86e1a0 — it folds whenever the row would wrap |
+| A model changed from another client left the open chat's composer naming the old one | ddfd7556 — the open chat re-reads its record on `chat.updated` |
+| Claude's limit read 1.00M with the default threshold and 872K (window − max output) with a custom one — below the CLI's own 967K compaction point | d4d8291c — the whole window either way |
+| A Claude orchestrator's Codex worker ran on Codex but its chat said claude-agent, so the session composer made Claude's capability decisions for it | 6231ae44 — the worker's record takes the provider of its model |
+
+Still for the owner: worker permission requests are answered from each worker's chat (the Tasks dock only links to it);
+the Claude CLI's default commit attribution ("Co-Authored-By: Claude …") appears in every Claude-made commit in a
+user's repo, workers included.
+
