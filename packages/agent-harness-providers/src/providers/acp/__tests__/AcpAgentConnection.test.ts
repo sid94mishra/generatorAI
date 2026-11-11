@@ -80,6 +80,10 @@ describe('AcpProvider (real JSON-RPC-over-stdio ACP)', () => {
     const kinds = events.map((e) => e.kind);
     expect(kinds).toContain('harness.token');
     expect(kinds[kinds.length - 1]).toBe('harness.idle');
+    // A chat records the reply from its completed message (TurnRecorder), so the turn ends on one.
+    const completed = events.filter((e) => e.kind === 'harness.message_complete');
+    expect(completed.map((e) => (e.data as { content: string }).content)).toEqual(['Hello from fake agent.']);
+    expect(kinds.indexOf('harness.message_complete')).toBeLessThan(kinds.lastIndexOf('harness.idle'));
   }, 10_000);
 
   it('L16 Tier-B gate denies an "execute" tool call before the agent ever sees an approval', async () => {

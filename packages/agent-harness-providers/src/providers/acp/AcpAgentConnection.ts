@@ -1171,6 +1171,13 @@ export class AcpAgentConnection implements IAgentHarness {
     const sink = createTurnSink();
     conv.turnSink = sink;
     let assistantText = '';
+    // The text since the last tool call: a chat records a turn from its `harness.message_complete` segments
+    // (TurnRecorder), so each one is completed before a tool call and at the end of the turn.
+    let segment = '';
+    const completeSegment = () => {
+      if (segment.trim()) this.broadcast(conv, { kind: 'harness.message_complete', data: { content: segment } });
+      segment = '';
+    };
     /** Tool calls announced but not yet resolved — see the W13-B1 guard below. */
     const openToolCallIds = new Set<string>();
     const costBefore = conv.lastCost;
@@ -1214,15 +1221,19 @@ export class AcpAgentConnection implements IAgentHarness {
                 });
               }
             }
+            completeSegment();
             this.endOwnCompaction(conv);
             this.reportTurnUsage(conv, response, costBefore);
             this.broadcast(conv, { kind: 'harness.idle', data: {} });
           }
           break;
         }
+        if (message.update.sessionUpdate === 'tool_call') completeSegment();
         this.applySessionUpdate(conv, message.update, openToolCallIds);
         if (message.update.sessionUpdate === 'agent_message_chunk') {
-          assistantText += textOf(message.update.content);
+          const text = textOf(message.update.content);
+          assistantText += text;
+          segment += text;
         }
       }
 
