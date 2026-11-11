@@ -19,7 +19,7 @@ history. None changes the session id. All bill a model call.
 | Claude Agent SDK | prompt `/compact [instructions]` (a turn) | yes | on by default; threshold from `getContextUsage().autoCompactThreshold` | `system/status compacting`, `status compact_result success\|failed`, `system/compact_boundary {trigger, pre_tokens, post_tokens?}`; hook `PostCompact.compact_summary` | pre, post (when present) |
 | Codex app-server | `thread/compact/start {threadId}` → `{}`, runs as a turn of kind `compact` | no (config `compact_prompt` only) | `model_auto_compact_token_limit` | `turn/*`, item `contextCompaction` started/completed (`thread/compacted` deprecated) | none — next `thread/tokenUsage/updated` |
 | Copilot SDK | `session.rpc.history.compact({customInstructions?})`, resolves when done (experimental) | yes | `infiniteSessions` (background at 80 %, blocking at 95 %) | `session.compaction_start`, `session.compaction_complete {success, error?, preCompactionTokens, postCompactionTokens, summaryContent?}` | pre, post |
-| OpenCode | `POST /session/{id}/summarize {providerID, modelID}` (v1, sync) | no | config `compaction.auto` | `session.compacted`; v2 `session.next.compaction.started/ended` | none |
+| OpenCode 2 | `POST /api/session/{id}/compact` — admitted at once, runs at the next safe point as its own run (2.x; 1.x is no longer supported) | no | config `compaction.auto` / `compaction.buffer` (free share of the window), set through GeneratorAI's own config layer | `session.compaction.started/delta/ended {reason: auto\|manual, text}` / `.failed` | before = the last step's fill; after: none until the next step |
 | ACP agents | a `/compact` prompt, only when the agent advertises the `compact` command | yes (as text) | agent's own | `compaction_update` (unstable, needs client capability `session.compaction`), else a synthetic tool call | from `usage_update` |
 
 ## 2. What the app does today (gaps)
@@ -104,6 +104,7 @@ new version diffed, the release notes between them read, and every change mapped
 | Copilot SDK / CLI | 1.0.8 / 1.0.75 → 1.0.29 / 1.0.107 | two new permission kinds | mapped to `other`; CLI pinned to the build the SDK was made against (protocol 3 on both); `history.compact` gains `customInstructions` | c3446f5f |
 | Claude Agent SDK | 0.3.220 → ~0.3.319 | none at compile time | three new assistant errors → auth; patch range only (the SDK changes behaviour almost daily) | d08d833f |
 | OpenCode | protocol 1.18.25 → 1.19.5 | none | an OpenCode 2 server is refused by name (it serves a different API under `/api/*`) | 6fdd9e5b |
+| OpenCode | 1.19.5 → **2.2.7** (2026-11-11) | the whole HTTP API | adapter rewritten for OpenCode 2 (`/api/*`, `--stdio` server, V2 events); OpenCode 1 is refused with an update message; see docs/agent-platform/opencode.md | the OpenCode 2 commits of 2026-11-11 |
 | ACP SDK | 1.4.0 → 2.5.0 (major) | default import is stable-only; schema path moved | both sides import `/unstable` (we use `usage`, plan updates); wire protocol stays v1, so every agent still interoperates | be0346c6 |
 
 Behaviour notes carried into the compaction work:
@@ -113,9 +114,24 @@ Behaviour notes carried into the compaction work:
 - Copilot's `compaction_complete` is flat (`preCompactionTokens`, `postCompactionTokens`, `tokenLimit`): the existing
   mapper read fields it does not carry (§2).
 
-Not done, for the owner to decide: **OpenCode 2** (`@opencode/cli`, 2.2.6) is a separate release line with a new HTTP
-API; supporting it is a port of the OpenCode adapter (or a switch to its `opencode acp` command through the ACP
-provider). The `opencode-ai` 1.x line we support is frozen at 1.19.5.
+**OpenCode 2** (2026-11-11): the adapter now drives OpenCode ≥ 2.0.0 (`@opencode/cli`, pinned contract 2.2.7) and
+OpenCode 1 is no longer supported. Compaction maps as follows (docs/agent-platform/opencode.md has the whole
+integration):
+
+- **Manual**: `POST /api/session/{id}/compact {}` → `compaction_start {trigger: manual}` at once; `session.compaction.ended
+  {reason: manual, text}` → `compact_boundary {trigger: manual, summary: text, preTokens}` (preTokens = the fill the last
+  step reported); `compactConversation` resolves once the compaction's own run has ended (`session.execution.*`, or 3 s
+  after the boundary), so that run's terminal can never be taken for the next turn's. `.failed` → `compaction_failed` and
+  a rejection; Stop interrupts the run → `compaction_failed` "Compaction stopped" + `harness.cancelled`.
+- **Auto**: `session.compaction.started/ended/failed {reason: auto}` → the same three events with `trigger: auto`, inside a
+  turn or between turns. The summary travels on the boundary (`summary`), so a handoff after it starts from it.
+- **Setting**: `autoCompact` → `compaction: {auto, buffer: "<100−P>%"}` in GeneratorAI's own config file
+  (`OPENCODE_CONFIG`, watched by the server; a project's own `opencode.json` still outranks it). It is one setting for the
+  whole server, as the app's setting is one setting for every chat. Against an external OpenCode server it is reported as
+  not applied (`FIELD_UNSUPPORTED_BY_PROVIDER`).
+- **Gauge**: `harness.context_usage` after every step, `currentTokens = input + cache.read + cache.write + output`,
+  `promptTokenLimit = limit.input ?? limit.context`, `compactionThreshold` = window × P % (default: window − max(15 %, 16K)).
+  No instructions (`compactInstructions: false`).
 
 ## 7. Evidence — the installed app (2026-11-09, macOS; Claude Agent and Codex GPT-5.6-Terra)
 
