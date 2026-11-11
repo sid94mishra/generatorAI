@@ -53,3 +53,52 @@ describe('ProviderLogo', () => {
     expect(screen.getByRole('img', { name: 'Codex provider' })).toBeTruthy();
   });
 });
+
+describe('ProviderLogo with a server-supplied mark (ACP-5)', () => {
+  it('draws the nodes as SVG elements, nested groups included, in the text colour', () => {
+    const { container } = render(
+      <ProviderLogo
+        provider="acp"
+        mark={{
+          viewBox: '0 0 16 16',
+          nodes: [
+            { tag: 'g', attrs: { transform: 'translate(1,1)', 'fill-rule': 'evenodd' }, children: [{ tag: 'circle', attrs: { cx: '7', cy: '7', r: '3' } }] },
+            { tag: 'rect', attrs: { x: '1', y: '1', width: '4', height: '4', 'stroke-width': '1.5', stroke: 'currentColor', fill: 'none' } },
+          ],
+        }}
+      />,
+    );
+    const svg = container.querySelector('svg')!;
+    expect(svg.getAttribute('viewBox')).toBe('0 0 16 16');
+    expect(svg.getAttribute('fill')).toBe('currentColor');
+    const g = svg.querySelector('g')!;
+    expect(g.getAttribute('transform')).toBe('translate(1,1)');
+    expect(g.getAttribute('fill-rule')).toBe('evenodd');
+    expect(g.querySelector('circle')!.getAttribute('r')).toBe('3');
+    expect(svg.querySelector('rect')!.getAttribute('stroke-width')).toBe('1.5');
+  });
+
+  it('renders only allow-listed tags, attributes and paint', () => {
+    const hostile = {
+      viewBox: '0 0 16 16',
+      nodes: [
+        { tag: 'script', attrs: {} },
+        { tag: 'image', attrs: { href: 'https://example.com/x.png' } },
+        { tag: 'path', attrs: { d: 'M0 0h4v4z', fill: 'url(#x)', onclick: 'alert(1)', style: 'color:red' } },
+      ],
+    };
+    const { container } = render(<ProviderLogo provider="acp" mark={hostile as never} />);
+    const svg = container.querySelector('svg')!;
+    expect(svg.querySelector('script, image')).toBeNull();
+    const path = svg.querySelector('path')!;
+    expect(path.getAttribute('d')).toBe('M0 0h4v4z');
+    expect(path.hasAttribute('fill')).toBe(false);
+    expect(path.hasAttribute('onclick')).toBe(false);
+    expect(path.hasAttribute('style')).toBe(false);
+  });
+
+  it('falls back to the registry mark without one', () => {
+    const { container } = render(<ProviderLogo provider="acp" mark={undefined} />);
+    expect(container.querySelector('path')!.getAttribute('d')).toBe(GENERIC_PROVIDER_LOGO.paths[0]!.d);
+  });
+});
