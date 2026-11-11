@@ -201,3 +201,43 @@ export const Field: Story = {
     await expect(trigger).toHaveTextContent('Claude Code');
   },
 };
+
+// ACP agents (ACP-3): the `acp` provider's enabled agents, each its own entry with its own mark.
+const AGENT_MARK = {
+  viewBox: '0 0 16 16',
+  nodes: [{ tag: 'path' as const, attrs: { fill: 'currentColor', d: 'M3 1h2.5v5.5L9 1h3L8.5 6.5 12.5 13H9.5L6 8v5H3V1z' } }],
+};
+const acpCatalog = buildModelPickerCatalog(
+  response({
+    providers: [
+      ...response().providers,
+      {
+        type: 'acp', label: 'ACP agents', installed: true, connected: true, authenticated: true, ready: true, modelCount: 2, supportsLogin: false,
+        models: [
+          { id: 'fake-agent/fast', name: 'Fast', provider: 'acp', subProvider: 'fake-agent', category: 'Fake', isDefault: true },
+          { id: 'fake-agent/smart', name: 'Smart', provider: 'acp', subProvider: 'fake-agent', category: 'Fake' },
+        ],
+        subProviders: [
+          { id: 'fake-agent', label: 'Fake agent', mark: AGENT_MARK, installed: true, connected: true, authState: 'not_required', authenticated: true, ready: true, modelCount: 2 },
+          {
+            id: 'other-agent', label: 'Other agent', installed: true, connected: true, authState: 'unauthenticated', authenticated: false, ready: false,
+            modelCount: 0, error: 'Sign in to Other agent in Settings.',
+          },
+        ],
+      },
+    ],
+  }),
+);
+
+/** Each enabled ACP agent is its own provider with its own mark; picking a model still sets provider `acp`. */
+export const AcpAgents: Story = {
+  args: { defaultOpen: true, value: 'fake-agent/smart', catalog: acpCatalog },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    const list = await body.findByRole('listbox', { name: 'Fake agent models' });
+    await expect(within(list).getByRole('option', { name: /Smart/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(body.getByRole('button', { name: /Other agent/ })).toHaveTextContent('Not signed in');
+    await userEvent.click(within(list).getByRole('option', { name: /Fast/ }));
+    await expect(args.onSelect).toHaveBeenCalledWith('fake-agent/fast');
+  },
+};

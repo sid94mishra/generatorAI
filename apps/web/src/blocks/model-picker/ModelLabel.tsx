@@ -3,7 +3,8 @@
 // catalog (the picker's catalog), for read-only places that show which model
 // ran: Activity details and workers, background task rows and detail (D-132).
 // A model the catalog does not list (its provider signed out, or hidden)
-// shows its raw id with the provider's logo when the caller knows it.
+// shows its raw id with the provider's logo when the caller knows it. An ACP
+// agent's model shows the agent's own mark (ACP-3).
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo } from 'react';
@@ -24,14 +25,16 @@ export interface ModelLabelProps {
 /** Provider logo + model name. */
 export function ModelLabel({ modelId, provider, mono = false, className }: ModelLabelProps) {
   const { data } = useHarnessProviders();
-  const model = useMemo(
-    () => (data ? findPickerModel(buildModelPickerCatalog(data), modelId, provider) : undefined),
-    [data, modelId, provider],
-  );
+  const { model, entry } = useMemo(() => {
+    if (!data) return { model: undefined, entry: undefined };
+    const catalog = buildModelPickerCatalog(data);
+    const found = findPickerModel(catalog, modelId, provider);
+    return { model: found, entry: found ? catalog.providers.find((p) => p.key === found.providerKey) : undefined };
+  }, [data, modelId, provider]);
   const owner = model?.provider ?? provider;
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-1.5', className)} title={model && model.name !== modelId ? modelId : undefined}>
-      {owner ? <ProviderLogo provider={owner} size={12} /> : null}
+      {owner ? <ProviderLogo provider={owner} mark={entry?.mark} size={12} /> : null}
       <span className={cn('min-w-0 truncate', mono && 'font-mono')}>{mono ? modelId : (model?.name ?? modelId)}</span>
     </span>
   );

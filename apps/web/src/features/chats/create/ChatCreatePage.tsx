@@ -223,7 +223,10 @@ export function ChatCreatePage() {
     () => (values.who !== 'model' && values.agentRef ? agents?.find((a) => a.ref === values.agentRef) : undefined),
     [agents, values.who, values.agentRef],
   );
-  const providerLabel = providers?.providers.find((p) => p.type === activeModel?.provider)?.label;
+  const providerEntry = providers?.providers.find((p) => p.type === activeModel?.provider);
+  // An ACP agent's model names the agent, with its own mark (ACP-3).
+  const agentEntry = activeModel?.subProvider ? providerEntry?.subProviders?.find((s) => s.id === activeModel.subProvider) : undefined;
+  const providerLabel = agentEntry?.label ?? providerEntry?.label;
   const projectName = values.projectId ? projects?.find((p) => p.id === values.projectId)?.name : undefined;
 
   const effortLevels = reasoningLevelsFor(activeModel);
@@ -619,7 +622,7 @@ export function ChatCreatePage() {
       content: (
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2">
-            {activeModel?.provider ? <ProviderLogo provider={activeModel.provider} size={14} /> : null}
+            {activeModel?.provider ? <ProviderLogo provider={activeModel.provider} mark={agentEntry?.mark} size={14} /> : null}
             {activeModel?.name ?? (values.model || 'Server default')}
             {selectedTokens ? <span className="font-mono text-small text-fg-3">{formatTokens(selectedTokens)}</span> : null}
           </span>

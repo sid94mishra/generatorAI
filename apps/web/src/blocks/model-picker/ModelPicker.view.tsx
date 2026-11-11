@@ -51,6 +51,7 @@ import {
   initialProvider,
   searchProvider,
   modelMeta,
+  providerOf,
 } from './modelPickerModel.js';
 
 export type ModelPickerVariant = 'chip' | 'field';
@@ -130,7 +131,7 @@ export function ModelPickerView({
   const popupRef = useRef<HTMLDivElement>(null);
 
   const selected = catalog ? findPickerModel(catalog, value) : undefined;
-  const selectedProvider = selected ? catalog?.providers.find((p) => p.type === selected.provider) : undefined;
+  const selectedProvider = providerOf(catalog, selected);
   // The selection is missing from a conclusive catalog (its provider signed
   // out or failed): say so instead of borrowing another provider's look.
   const unavailable = Boolean(value) && !selected && !loading && (catalog?.providers.length ?? 0) > 0;
@@ -154,7 +155,7 @@ export function ModelPickerView({
       >
         {selected ? (
           <span className="flex min-w-0 items-center gap-1.5">
-            <ProviderLogo provider={selected.provider} size={14} />
+            <ProviderLogo provider={selected.provider} mark={selectedProvider?.mark} size={14} />
             <span className="truncate">{label}</span>
           </span>
         ) : (
@@ -179,7 +180,7 @@ export function ModelPickerView({
       >
         <span className="flex min-w-0 items-center gap-2">
           {unavailable ? <Icon concept="warning" size={14} className="shrink-0 text-warn" /> : null}
-          {selected ? <ProviderLogo provider={selected.provider} size={14} /> : null}
+          {selected ? <ProviderLogo provider={selected.provider} mark={selectedProvider?.mark} size={14} /> : null}
           <span className={cn('truncate', !value && 'text-fg-3')}>{label}</span>
           {selected ? <span className="truncate text-small text-fg-3">{modelMeta(selected, selectedProvider)}</span> : null}
         </span>
@@ -235,8 +236,8 @@ function ModelPickerPanel({ value, preferredProvider, catalog, loading, refreshi
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const listId = useId();
 
-  const providerType = searchProvider(catalog, browse ?? initialProvider(catalog, value, preferredProvider), query);
-  const provider = catalog?.providers.find((p) => p.type === providerType);
+  const providerKey = searchProvider(catalog, browse ?? initialProvider(catalog, value, preferredProvider), query);
+  const provider = catalog?.providers.find((p) => p.key === providerKey);
   const visible = useMemo(() => filterModels(provider?.models ?? [], query), [provider, query]);
 
   const highlighted =
@@ -282,10 +283,10 @@ function ModelPickerPanel({ value, preferredProvider, catalog, loading, refreshi
         <ProviderColumn
           catalog={catalog}
           loading={loading}
-          active={providerType}
+          active={providerKey}
           onOpenProviderSettings={onOpenProviderSettings}
-          onPick={(type) => {
-            setBrowse(type);
+          onPick={(key) => {
+            setBrowse(key);
             setHighlightedId(null);
           }}
         />
@@ -364,7 +365,7 @@ function ProviderColumn({
   catalog: ModelPickerCatalog | undefined;
   loading: boolean;
   active: string | null;
-  onPick: (type: string) => void;
+  onPick: (key: string) => void;
   onOpenProviderSettings?: () => void;
 }) {
   const providers = catalog?.providers ?? [];
@@ -383,7 +384,7 @@ function ProviderColumn({
             </div>
           ))
         : providers.map((p) => (
-            <ProviderRow key={p.type} provider={p} active={p.type === active} onPick={() => onPick(p.type)} />
+            <ProviderRow key={p.key} provider={p} active={p.key === active} onPick={() => onPick(p.key)} />
           ))}
       {notReady && notReady.availability !== 'ready' ? (
         <div className="mt-1 flex flex-col items-start gap-1 px-1.5 text-micro text-fg-3">
@@ -413,7 +414,7 @@ function ProviderRow({ provider, active, onPick }: { provider: PickerProvider; a
     >
       <span className="flex min-w-0 items-center gap-2">
         <span className="flex size-6 shrink-0 items-center justify-center">
-          <ProviderLogo provider={provider.type} size={20} />
+          <ProviderLogo provider={provider.type} mark={provider.mark} size={20} />
         </span>
         <span className="flex min-w-0 flex-col">
           <span className={cn('truncate text-ui', ready ? 'text-fg' : pressedMeta)}>{provider.label}</span>
@@ -514,7 +515,7 @@ function ModelDetail({ model, provider }: { model: PickerModel | undefined; prov
             <div className="flex min-h-5 items-center justify-between gap-2">
               <dt className="truncate text-fg-3">Provider</dt>
               <dd className="flex min-w-0 items-center gap-1.5 text-fg">
-                <ProviderLogo provider={model.provider} size={12} />
+                <ProviderLogo provider={model.provider} mark={provider?.mark} size={12} />
                 <span className="truncate">{provider?.label ?? model.provider}</span>
               </dd>
             </div>
