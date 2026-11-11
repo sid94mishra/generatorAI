@@ -13,6 +13,9 @@
 // fully tested from every client; the group at the end reveals or hides them
 // (admin:harnesses; an operator's GENERATORAI_EXPERIMENTAL_PROVIDERS reveal is
 // shown and cannot be switched off here).
+//
+// ACP agents (docs/acp): the `acp` provider row only summarises them; each
+// agent is set up in the ACP agents group below the rows (AcpAgentsSection).
 // ────────────────────────────────────────────────────────────────
 
 import { useState } from 'react';
@@ -39,6 +42,7 @@ import { Switch } from '@/ui/primitives/Switch/Switch.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
+import { AcpAgentsSection } from './AcpAgentsSection.js';
 import { CompactionSettings } from './CompactionSettings.js';
 import { CatalogRow } from '../CatalogRow.js';
 import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
@@ -48,10 +52,11 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   'claude-agent': 'Claude Agent SDK — agentic execution with native tool use.',
   codex: 'OpenAI Codex app-server — GPT models via your ChatGPT sign-in or API key.',
   opencode: 'OpenCode 2 — models from every provider you signed in to in OpenCode, run by its own server.',
-  acp: 'Agent Client Protocol — any ACP-compatible agent.',
+  acp: 'Agents from the ACP Registry and custom agents. Set them up under ACP agents below.',
 };
 
 const SIGN_IN_HINTS: Record<string, string> = {
+  acp: 'Install an agent under ACP agents below, sign in to it and turn it on.',
   codex: 'Sign in with your ChatGPT account using the button above (or run `codex login` in a terminal), then test the connection.',
   'claude-agent': 'Run `claude` in a terminal and sign in, then test the connection.',
   opencode: 'Run `opencode` in a terminal and connect a model provider there, then test the connection.',
@@ -207,6 +212,8 @@ export function ProvidersSection() {
 
       {message ? <Callout tone={message.tone === 'ok' ? 'ok' : 'err'}>{message.text}</Callout> : null}
 
+      <AcpAgentsSection />
+
       <CompactionSettings />
 
       <ExperimentalProviders />
@@ -272,6 +279,10 @@ function ExperimentalProviders() {
 function ConnectionBadge({ provider, checking }: { provider: HarnessProviderStatus; checking: boolean }) {
   if (checking) return <Badge tone="neutral">Checking…</Badge>;
   if (provider.ready) return <Badge tone="ok">Connected</Badge>;
+  // A multiplexing provider (acp) is as ready as its agents: say how many are, not "Not signed in".
+  if (provider.subProviders) {
+    return <Badge tone="neutral">{provider.subProviders.length === 0 ? 'No agents turned on' : 'No agent ready'}</Badge>;
+  }
   // Not an error: an optional provider that is absent is neutral (the model picker
   // dims it the same way); an installed one waiting for sign-in asks for action.
   if (provider.installing) return <Badge tone="neutral">Downloading…</Badge>;
