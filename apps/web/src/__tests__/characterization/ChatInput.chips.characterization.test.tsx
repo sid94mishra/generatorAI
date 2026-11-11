@@ -332,6 +332,22 @@ describe('ChatInput — toolbar collapse below 420 px (09 §5.1; 03 §6.1 #17)',
     expect(effortChip()).toBeInTheDocument();
   });
 
+  it('folds when the row overflows above 420 px, and unfolds once the toolbar is as wide as the row needed', () => {
+    // A long model label beside the gauge and Compact: the row wrapped at 544 px and Compact sat alone under "+".
+    const ro = stubResizeObserver();
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ width: 200 } as DOMRect);
+    renderComposer({ selectedModel: 'model-full' }, { models: [MODEL_FULL] });
+    ro.resize(544);
+    expect(effortChip()).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
+    // Still narrower than the row the full controls needed: stays folded.
+    ro.resize(560);
+    expect(effortChip()).not.toBeInTheDocument();
+    ro.resize(4000);
+    expect(effortChip()).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
   it('shows no "More options" when the model has neither control', () => {
     const ro = stubResizeObserver();
     renderComposer({ selectedModel: 'model-plain' }, { models: [MODEL_PLAIN] });
