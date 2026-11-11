@@ -1120,6 +1120,8 @@ export class CopilotProvider implements IAgentHarness {
       // SDK 1.0: onPermissionRequest is now required on SessionConfig.
       // Default to approveAll; overridden below if params.onPermissionRequest is provided.
       onPermissionRequest: approveAll,
+      // No "Co-authored-by: Copilot" trailer in the commits the agent makes in the user's repositories (owner decision).
+      coauthorEnabled: false,
     };
     // The app's auto-compaction setting (docs/compaction §3.6) is Copilot's `infiniteSessions`.
     const infinite = infiniteSessionsFor(params.autoCompact);
@@ -1427,7 +1429,7 @@ export class CopilotProvider implements IAgentHarness {
     const { buildSdkTools } = await import('./tool-factory.js');
     // Default only until we know whether this conversation gates permissions;
     // replaced below when the caller supplies a handler.
-    const resumeConfig: ResumeSessionConfig = { onPermissionRequest: approveAll };
+    const resumeConfig: ResumeSessionConfig = { onPermissionRequest: approveAll, coauthorEnabled: false };
     const warnings: ConversationWarning[] = [];
     let registeredAgents: HarnessAgentInfo[] = [];
     if (params) {

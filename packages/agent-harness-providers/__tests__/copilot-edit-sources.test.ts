@@ -25,8 +25,8 @@ interface FakeSession {
 const sdk = vi.hoisted(() => ({
   clients: [] as Array<{
     workingDirectory: string | undefined;
-    created: Array<{ sessionId: string; workingDirectory?: string }>;
-    resumed: Array<{ id: string; workingDirectory?: string; systemMessage?: unknown }>;
+    created: Array<{ sessionId: string; workingDirectory?: string; coauthorEnabled?: boolean }>;
+    resumed: Array<{ id: string; workingDirectory?: string; systemMessage?: unknown; coauthorEnabled?: boolean }>;
   }>,
   sessions: [] as unknown[],
   failResume: false,
@@ -179,6 +179,15 @@ describe('CopilotProvider — Edit sources on a live chat (D-137)', () => {
     const newClient = sdk.clients.find((c) => c.workingDirectory === NEW)!;
     expect(newClient.resumed.map((r) => [r.id, r.workingDirectory])).toEqual([['c1', NEW]]);
     expect(liveSession(provider)!.cwd).toBe(NEW);
+  });
+
+  it('turns off the Co-authored-by trailer on the created and the resumed session', async () => {
+    const provider = makeProvider();
+    await provider.createConversation(params({ workingDirectory: OLD }));
+    await provider.resumeConversation('c1', params({ workingDirectory: NEW }));
+
+    expect(sdk.clients.find((c) => c.workingDirectory === OLD)!.created[0]!.coauthorEnabled).toBe(false);
+    expect(sdk.clients.find((c) => c.workingDirectory === NEW)!.resumed[0]!.coauthorEnabled).toBe(false);
   });
 
   it('rebinds in place when only the extra directories change (the [Workspace] hint moves)', async () => {
