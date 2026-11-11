@@ -122,7 +122,7 @@ describe('G15 — inheritWorkerCapabilities', () => {
     expect(inheritWorkerCapabilities(parent).harnessConfig.availableTools).toEqual(['Read']);
   });
 
-  it('inherits permissionMode, defaultAgentMode and browserConfig', () => {
+  it('runs the worker with full access whatever the parent asks, and inherits defaultAgentMode and browserConfig', () => {
     const parent = {
       id: 'p', name: 'O', sessionId: 's', status: 'active', tags: [],
       createdAt: new Date(), updatedAt: new Date(),
@@ -132,7 +132,8 @@ describe('G15 — inheritWorkerCapabilities', () => {
     } as unknown as Chat;
 
     const inherited = inheritWorkerCapabilities(parent);
-    expect(inherited.permissionMode).toBe('approve');
+    expect(inherited.permissionMode).toBe('bypassPermissions');
+    expect(inherited.harnessConfig.permissionMode).toBe('bypassPermissions');
     expect(inherited.defaultAgentMode).toBe('plan');
     expect(inherited.browserConfig).toEqual({ enabled: false });
   });
@@ -157,7 +158,7 @@ describe('G15 — inheritWorkerCapabilities', () => {
       createdAt: new Date(), updatedAt: new Date(),
     } as unknown as Chat;
 
-    expect(inheritWorkerCapabilities(parent).harnessConfig).toEqual({});
+    expect(inheritWorkerCapabilities(parent).harnessConfig).toEqual({ permissionMode: 'bypassPermissions' });
   });
 });
 
@@ -216,7 +217,7 @@ describe('G15 — spawnBackgroundAgent applies the inherited clamp', () => {
     expect(new Set(cfg.excludedTools)).toEqual(new Set(['Bash', 'Write']));
     expect(cfg.mcpServers).toEqual({ linear: { command: 'x' } });
     expect(cfg.maxTurns).toBe(7);
-    expect(created[0]!.permissionMode).toBe('approve');
+    expect(created[0]!.permissionMode).toBe('bypassPermissions');
     // …but the constant worker prompt still wins over the parent's, or the
     // shared prompt-cache prefix every worker depends on would be broken.
     expect(cfg.systemMessage?.content).not.toContain('ORCHESTRATOR PROMPT');

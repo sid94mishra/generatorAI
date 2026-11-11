@@ -309,7 +309,6 @@ export class SessionComposer {
                   ...(i.spec.mcp?.servers ? { mcpServers: i.spec.mcp.servers as HarnessConfig['mcpServers'] } : {}),
                 },
                 toolPolicy: projection.toolPolicy,
-                permissionMode: mode as NonNullable<Parameters<typeof inheritWorkerCapabilitiesFrom>[0]['permissionMode']>,
                 computerUse,
               }),
             },

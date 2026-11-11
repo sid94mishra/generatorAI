@@ -255,6 +255,9 @@ const PROGRESS_THROTTLE_MS = 500;
 /** How much of a worker's assistant text rides on a progress event. */
 const PROGRESS_TEXT_TAIL = 240;
 
+/** Background workers run with full access: their tool calls are never held for approval (owner decision). */
+export const WORKER_PERMISSION_MODE = 'bypassPermissions' satisfies NonNullable<Chat['permissionMode']>;
+
 /** What a worker inherits from the orchestrator that spawned it (G15). */
 export interface InheritedWorkerCapabilities {
   harnessConfig: Partial<HarnessConfig>;
@@ -265,7 +268,7 @@ export interface InheritedWorkerCapabilities {
    * parent had off, and the workflow groups off (workers never fan out).
    */
   agentOverrides: AgentOverrides;
-  permissionMode?: Chat['permissionMode'];
+  permissionMode: typeof WORKER_PERMISSION_MODE;
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
   /**
@@ -297,8 +300,11 @@ export interface InheritedWorkerCapabilities {
  *     stays denied for the worker even when the worker binds its own agent.
  *   - `availableTools` is inherited whenever the parent declared one — an
  *     allow-list is a restriction, and dropping it widens the worker.
- *   - `permissionMode` is inherited so a worker cannot approve its own tool
- *     calls in an orchestrator that requires prompting.
+ *   - `permissionMode` is NOT inherited: a worker always runs with full
+ *     access (`WORKER_PERMISSION_MODE`, owner decision 2026-11-11). Nobody
+ *     watches a background worker's chat, so a prompt there stalled the task
+ *     until the user opened each worker's chat to approve it. The tool clamp
+ *     above still applies.
  *
  * △ `agentRef` is deliberately NOT inherited. The orchestrator's own agent
  * has `role: 'orchestrator'`, which `AgentResolver` translates into
@@ -313,7 +319,6 @@ export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabili
     harnessConfig: parent.harnessConfig ?? {},
     ...(parent.agentSnapshot?.toolPolicy ? { toolPolicy: parent.agentSnapshot.toolPolicy } : {}),
     ...(parent.agentOverrides ? { agentOverrides: parent.agentOverrides } : {}),
-    ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
     computerUse: 'switch',
@@ -330,7 +335,6 @@ export function inheritWorkerCapabilitiesFrom(parent: {
   toolPolicy?: { allow: string[]; deny: string[]; groups?: AgentToolPolicy };
   /** The parent's own capability delta (a chat's `agentOverrides`). */
   agentOverrides?: AgentOverrides;
-  permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
   computerUse: TurnPolicy['computerUse'];
@@ -357,7 +361,7 @@ export function inheritWorkerCapabilitiesFrom(parent: {
     ...(parentConfig.reasoningEffort ? { reasoningEffort: parentConfig.reasoningEffort } : {}),
     ...(parentConfig.contextTier ? { contextTier: parentConfig.contextTier } : {}),
     ...(parentConfig.maxTurns !== undefined ? { maxTurns: parentConfig.maxTurns } : {}),
-    ...(parentConfig.permissionMode ? { permissionMode: parentConfig.permissionMode } : {}),
+    permissionMode: WORKER_PERMISSION_MODE,
     ...(excluded.size > 0 ? { excludedTools: [...excluded] } : {}),
     // An allow-list is a restriction. Inherit the parent's when it has one;
     // an agent-derived allow-list only narrows further, so union is wrong here.
@@ -383,7 +387,7 @@ export function inheritWorkerCapabilitiesFrom(parent: {
   return {
     harnessConfig,
     agentOverrides,
-    ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
+    permissionMode: WORKER_PERMISSION_MODE,
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
     computerUse: parent.computerUse,
@@ -763,7 +767,7 @@ export class OrchestratorService {
         // G15 — capability inheritance (see `inheritWorkerCapabilities`),
         // the built-in clamp through the resolver (C-15).
         agentOverrides: inherited.agentOverrides,
-        ...(inherited.permissionMode ? { permissionMode: inherited.permissionMode } : {}),
+        permissionMode: inherited.permissionMode,
         ...(inherited.defaultAgentMode ? { defaultAgentMode: inherited.defaultAgentMode } : {}),
         ...(inherited.browserConfig ? { browserConfig: inherited.browserConfig } : {}),
         harnessConfig: {
