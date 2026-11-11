@@ -181,9 +181,15 @@ Found and fixed on the way:
 |---|---|
 | The summary unfolded inside the transcript | 726510bf — a dialog |
 | The composer's toolbar wrapped (Compact alone under "+") beside a long model label: it folded effort and context only below a fixed 420 px | fe86e1a0 — it folds whenever the row would wrap |
-| A model changed from another client left the open chat's composer naming the old one | ddfd7556 — the open chat re-reads its record on `chat.updated` |
+| A model changed from another client left the open chat's composer naming the old one | 23162a49 — the chat stream's router maps `chat.updated` to a refetch of the chat (ddfd7556 did it from the chat-list stream, which no surface keeps open beside a chat; reverted there) |
 | Claude's limit read 1.00M with the default threshold and 872K (window − max output) with a custom one — below the CLI's own 967K compaction point | d4d8291c — the whole window either way |
 | A Claude orchestrator's Codex worker ran on Codex but its chat said claude-agent, so the session composer made Claude's capability decisions for it | 6231ae44 — the worker's record takes the provider of its model |
+| 30 % on a chat that names Sonnet 5.5 by its alias compacted at 67K: the result reports limits under the wire model, the alias fell back to 200K | fd4b1b6e — the turn's main model's limits are recorded under the alias too |
+
+Verified on the final build (E7–E9): the composer follows a model switched from another client both ways without a
+reload; Compact stays on the toolbar's row (effort and context fold into More options); Claude's limit reads 1.00M
+with a custom threshold and "Auto-compacts at 300k" for 30 % of 1M from the second turn after a launch; an Opus
+orchestrator's Codex worker is recorded as `codex` and ran there.
 
 Still for the owner: worker permission requests are answered from each worker's chat (the Tasks dock only links to it);
 the Claude CLI's default commit attribution ("Co-Authored-By: Claude …") appears in every Claude-made commit in a
