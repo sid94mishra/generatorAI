@@ -42,7 +42,6 @@ import {
 import type { ChatBulkResult, ChatListItem, ChatListPage, ChatListQuery } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
-import { queryKeys } from './queries.js';
 
 /** Under `['chats']`, so every existing `queryKeys.chats` invalidation refreshes lists too. */
 export const chatListKeys = {
@@ -56,16 +55,6 @@ function frameKind(raw: string): string | null {
   try {
     const frame = JSON.parse(raw) as { kind?: unknown };
     return typeof frame.kind === 'string' ? frame.kind : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The chat a `chat.updated` frame names. */
-function updatedChatId(raw: string): string | null {
-  try {
-    const frame = JSON.parse(raw) as { kind?: unknown; data?: { chatId?: unknown } };
-    return frame.kind === 'chat.updated' && typeof frame.data?.chatId === 'string' ? frame.data.chatId : null;
   } catch {
     return null;
   }
@@ -139,10 +128,6 @@ function useLiveChatList(query: ChatListQuery, key: readonly unknown[], enabled:
         onMessage: (message) => {
           const kind = frameKind(message.data);
           if (kind && chatListInvalidatedBy(kind, query)) refetch.schedule();
-          // The open chat's own record too: a model or provider changed elsewhere (a paired phone, another window)
-          // otherwise leaves its composer naming the old model until a reload.
-          const updated = updatedChatId(message.data);
-          if (updated) void queryClient.invalidateQueries({ queryKey: queryKeys.chat(updated), exact: true });
         },
         // Events were missed (no replay from our cursor, or a reconnect).
         onResync: () => refetch.now(),

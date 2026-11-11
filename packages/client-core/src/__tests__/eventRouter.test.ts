@@ -389,6 +389,10 @@ describe('StreamEventRouter — session_info notices', () => {
     expect(ops(run([info('compact_boundary', 'x', { trigger: 'manual', preTokens: 150_000, postTokens: 20_000 })]))).toBe(0);
   });
 
+  it('refetches the chat when its record changed elsewhere (a model switched from a paired phone)', () => {
+    expect(run([{ kind: 'chat.updated', data: { chatId: 'c-1' } }])).toContainEqual({ op: 'invalidate', resource: 'chat', id: 'c-1' });
+  });
+
   it('stays silent for the high-volume informational types', () => {
     // These are per-chunk or per-poll frames that no surface reads; admitting
     // them would put a transcript row on every line of command output.

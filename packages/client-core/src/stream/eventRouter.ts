@@ -1499,6 +1499,12 @@ export class StreamEventRouter {
         out.push({ op: 'invalidate', resource: 'chats' });
         break;
 
+      // The record changed (model, provider, name, …) — from this client or another one, a paired phone. Without
+      // the chat's own refetch its composer kept naming the old model while the chat already ran on the new one.
+      case 'chat.updated':
+        out.push({ op: 'invalidate', resource: 'chat', ...chatId() });
+        break;
+
       case 'chat.prompt_sent':
         out.push({ op: 'invalidate', resource: 'messages', ...chatId() });
         break;
