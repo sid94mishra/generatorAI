@@ -19,7 +19,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { CodexProvider, CodexRpcError, CodexRateLimitedError } from '../CodexProvider.js';
+import { CodexProvider, CodexRpcError, CodexRateLimitedError, CODEX_NO_ATTRIBUTION } from '../CodexProvider.js';
 import {
   runCapabilityDeclarationConformance,
   runConversationLifecycleConformance,
@@ -836,7 +836,7 @@ describe('CodexProvider — integration parity with the other providers', () => 
     const echoed = JSON.parse((await p.sendPromptAndWait('resume-me', 'ECHO_PARAMS')).content) as {
       thread: { developerInstructions?: string; config?: Record<string, unknown> };
     };
-    expect(echoed.thread.developerInstructions).toBe('You are an orchestrator.');
+    expect(echoed.thread.developerInstructions).toBe(`You are an orchestrator.\n\n${CODEX_NO_ATTRIBUTION}`);
     expect(echoed.thread.config).toEqual({
       projects: { [process.cwd()]: { trust_level: 'trusted' } },
       sandbox_workspace_write: { network_access: true },

@@ -260,6 +260,10 @@ interface ConversationState {
 /** How many finished turn ids to remember per conversation. */
 const RETIRED_TURN_MEMORY = 32;
 
+/** Appended to every thread's developer instructions: commits and pull requests carry no Codex attribution. */
+export const CODEX_NO_ATTRIBUTION =
+  'Do not add Codex attribution to git commits or pull requests: no `Co-authored-by: Codex` trailer and no "Generated with Codex" line.';
+
 /**
  * Codex has no switch for automatic compaction, only the token count it starts at
  * (`model_auto_compact_token_limit`). "Off" is a count no context window reaches.
@@ -1437,6 +1441,11 @@ export class CodexProvider implements IAgentHarness {
     } else if (params.systemPromptAppend) {
       out.developerInstructions = params.systemPromptAppend;
     }
+    // Codex adds `Co-authored-by: Codex` to the commits it makes when the account's workspace allows it, and
+    // codex 0.167 has no config key to turn that off; the owner wants no agent attribution in their repositories.
+    out.developerInstructions = out.developerInstructions
+      ? `${out.developerInstructions}\n\n${CODEX_NO_ATTRIBUTION}`
+      : CODEX_NO_ATTRIBUTION;
     if (params.maxTurns != null) {
       warnings.push({
         code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
