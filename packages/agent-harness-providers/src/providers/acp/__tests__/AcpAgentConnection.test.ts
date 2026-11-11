@@ -481,7 +481,8 @@ describe('AcpProvider — compaction (docs/compaction)', () => {
     const { events } = collect(p, 'cmd');
     await untilCompactable(p, 'cmd');
     expect(p.capabilitiesFor('cmd')).toMatchObject({ conversationCompact: true, compactInstructions: true });
-    // The usage the agent reported between prompts reached the gauge.
+    // The usage the agent reported between prompts reached the gauge (a second notification: wait for it too).
+    for (let i = 0; i < 50 && !events.some((e) => e.kind === 'harness.context_usage'); i++) await new Promise((r) => setTimeout(r, 20));
     expect(events).toContainEqual(expect.objectContaining({
       kind: 'harness.context_usage',
       data: expect.objectContaining({ currentTokens: 90000, promptTokenLimit: 200000, source: 'provider' }),
