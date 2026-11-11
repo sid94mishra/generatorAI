@@ -1266,7 +1266,6 @@ export class AcpAgentConnection implements IAgentHarness {
     const usage = response?.usage;
     const cost = conv.lastCost;
     const costDelta = cost && (!costBefore || costBefore.currency === cost.currency) ? cost.amount - (costBefore?.amount ?? 0) : undefined;
-    if (!usage && costDelta === undefined) return;
     const prev = conv.lastUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     const now = usage
       ? {
@@ -1277,7 +1276,10 @@ export class AcpAgentConnection implements IAgentHarness {
         }
       : prev;
     conv.lastUsage = now;
-    const model = findSelectOption(conv.configOptions, 'model')?.currentValue ?? conv.params.model ?? this.agentId;
+    // Reported on every turn, usage or not: the turn row records the model from it, and the transcript draws the
+    // agent's name and mark from the picker id (`<agentId>/<value>`, ACP-2), not the agent's bare option value.
+    const value = findSelectOption(conv.configOptions, 'model')?.currentValue ?? conv.params.model;
+    const model = value ? `${this.agentId}/${value}` : this.agentId;
     this.broadcast(conv, {
       kind: 'harness.usage',
       data: {

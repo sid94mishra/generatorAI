@@ -47,6 +47,25 @@ describe('AcpProvider (real JSON-RPC-over-stdio ACP)', () => {
     await expect(provider.ping()).resolves.toBe(true);
   }, 10_000);
 
+  it('names the turn\'s model by its picker id on every turn, so the transcript can draw the agent', async () => {
+    const withModels = makeProvider({ command: process.execPath, args: [FIXTURE_AGENT], agentId: 'fake', env: { FAKE_ACP_MODELS: '1' } });
+    await withModels.initialize();
+    await withModels.createConversation({ conversationId: 'm1', model: 'smart' } as CreateConversationParams);
+    const a = collect(withModels, 'm1');
+    await withModels.sendPromptAndWait('m1', 'hello');
+    a.stop();
+    expect(a.events.filter((e) => e.kind === 'harness.usage').map((e) => (e.data as { model: string }).model)).toEqual(['fake/smart']);
+
+    // An agent without a model option: the agent id alone.
+    const plain = makeProvider({ command: process.execPath, args: [FIXTURE_AGENT], agentId: 'plain' });
+    await plain.initialize();
+    await plain.createConversation({ conversationId: 'm2' } as CreateConversationParams);
+    const b = collect(plain, 'm2');
+    await plain.sendPromptAndWait('m2', 'hello');
+    b.stop();
+    expect(b.events.filter((e) => e.kind === 'harness.usage').map((e) => (e.data as { model: string }).model)).toEqual(['plain']);
+  }, 15_000);
+
   it('fails initialize() with a helpful error when the binary does not exist (ENOENT)', async () => {
     const provider = makeProvider({ command: 'generatorai-acp-binary-that-does-not-exist-xyz' });
     await expect(provider.initialize()).rejects.toThrow(/not found/i);
