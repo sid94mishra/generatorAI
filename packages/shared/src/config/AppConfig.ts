@@ -104,6 +104,16 @@ export const AppConfigSchema = z.object({
           networkAccess: z.boolean().optional(),
         })
         .default({}),
+      /** OpenCode 2 (`opencode serve`) options. OpenCode runs alongside the other providers whenever an
+       *  OpenCode ≥ 2.0.0 CLI is found; its own config and sign-in stay in effect underneath. */
+      opencode: z
+        .object({
+          /** Explicit CLI path. Unset → `OPENCODE_BIN`, then PATH, then the installers' locations. */
+          binaryPath: z.string().optional(),
+          /** Model for new sessions, `providerID/modelID`. Unset → OpenCode's default model. */
+          defaultModel: z.string().optional(),
+        })
+        .default({}),
     })
     .default({}),
 

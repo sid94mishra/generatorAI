@@ -47,18 +47,20 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   copilot: 'GitHub Copilot SDK — GPT, Claude, and Gemini models via your GitHub account.',
   'claude-agent': 'Claude Agent SDK — agentic execution with native tool use.',
   codex: 'OpenAI Codex app-server — GPT models via your ChatGPT sign-in or API key.',
-  opencode: 'OpenCode server — models from any provider OpenCode is configured for.',
+  opencode: 'OpenCode 2 — models from every provider you signed in to in OpenCode, run by its own server.',
   acp: 'Agent Client Protocol — any ACP-compatible agent.',
 };
 
 const SIGN_IN_HINTS: Record<string, string> = {
   codex: 'Sign in with your ChatGPT account using the button above (or run `codex login` in a terminal), then test the connection.',
   'claude-agent': 'Run `claude` in a terminal and sign in, then test the connection.',
+  opencode: 'Run `opencode` in a terminal and connect a model provider there, then test the connection.',
 };
 
 const INSTALL_HINTS: Record<string, string> = {
   copilot: 'The Copilot CLI is downloaded the first time you use it (about 155 MB), so the app itself stays smaller. Download it above, then sign in.',
   codex: 'This build ships the Codex CLI, so this usually means its platform package could not be installed. Install Codex with `npm i -g @openai/codex` or the ChatGPT desktop app, or set CODEX_CLI_PATH to its location — then restart GeneratorAI.',
+  opencode: 'Install OpenCode 2 (`npm i -g @opencode/cli`, `brew install anomalyco/tap/opencode-v2`, or the installer at opencode.ai) and sign in to a model provider with `opencode` — or set OPENCODE_BIN to its location — then restart GeneratorAI.',
 };
 
 export function ProvidersSection() {

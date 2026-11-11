@@ -42,14 +42,14 @@ describe('resolveProviderVisibility', () => {
       copilot: true,
       'claude-agent': true,
       codex: true,
-      opencode: false,
-      acp: false,
+      opencode: true,
+      acp: true,
     });
   });
 
   it('an env reveal wins over a setting that hides the provider', () => {
     const list = resolveProviderVisibility({ visible: { opencode: false } }, new Set(['opencode']));
-    expect(list.find((p) => p.type === 'opencode')).toMatchObject({ visible: true, source: 'env', stability: 'experimental' });
+    expect(list.find((p) => p.type === 'opencode')).toMatchObject({ visible: true, source: 'env', stability: 'stable' });
   });
 
   it('parses the env list, `all`, and ignores unknown ids', () => {
@@ -63,25 +63,25 @@ describe('ProviderVisibilityStore', () => {
   it('applies the hidden set at load and after each change, and persists the change', async () => {
     const applied: string[][] = [];
     const store = await ProviderVisibilityStore.load(dir, {}, (hidden) => applied.push([...hidden].sort()));
-    expect(applied.at(-1)).toEqual(['acp', 'opencode']);
+    expect(applied.at(-1)).toEqual([]);
 
-    await store.update({ opencode: true, codex: false });
-    expect(applied.at(-1)).toEqual(['acp', 'codex']);
+    await store.update({ opencode: false, codex: false });
+    expect(applied.at(-1)).toEqual(['codex', 'opencode']);
     expect(JSON.parse(readFileSync(path.join(dir, 'provider-visibility.json'), 'utf8')).visible).toEqual({
-      opencode: true,
+      opencode: false,
       codex: false,
     });
 
     // A restart reads the same choice back; null returns a provider to its default.
     const again = await ProviderVisibilityStore.load(dir, {}, () => undefined);
-    expect(again.hidden().sort()).toEqual(['acp', 'codex']);
-    await again.update({ codex: null });
-    expect(again.hidden().sort()).toEqual(['acp']);
+    expect(again.hidden().sort()).toEqual(['codex', 'opencode']);
+    await again.update({ codex: null, acp: false });
+    expect(again.hidden().sort()).toEqual(['acp', 'opencode']);
   });
 
   it('reads the env reveal list', async () => {
     const store = await ProviderVisibilityStore.load(dir, { [EXPERIMENTAL_PROVIDERS_ENV]: 'acp' }, () => undefined);
-    expect(store.hidden()).toEqual(['opencode']);
+    expect(store.hidden()).toEqual([]);
   });
 });
 

@@ -29,7 +29,7 @@ export const HARNESS_PROVIDER_STABILITY: Record<HarnessProviderId, HarnessProvid
   'claude-agent': 'stable',
   codex: 'stable',
   copilot: 'stable',
-  opencode: 'experimental',
+  opencode: 'stable',
   acp: 'stable',
 };
 

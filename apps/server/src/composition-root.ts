@@ -13,7 +13,7 @@ import { CompactionSettingsStore, autoCompactFor } from './settings/compaction.j
 import { ProviderVisibilityStore } from './settings/providerVisibility.js';
 import { CopilotCliService } from './settings/copilotCli.js';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, resolveOpenCodeCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { defaultSttLanguage, readAudioPreferences } from './settings/audio.js';
@@ -432,6 +432,16 @@ export async function createContainer(config: AppConfig, options: CreateContaine
   }
   const codexHome = harnessHomeDir('codex') ?? process.env['CODEX_HOME'];
 
+  // OpenCode 2 is not bundled: the user's own install is used (configured path → OPENCODE_BIN → PATH, which the
+  // desktop app takes from the login shell → the installers' locations). Without one the provider stays
+  // unconfigured and Settings shows the install hint. Its sign-in lives in OpenCode's own data directory.
+  const openCodeCommand = await resolveOpenCodeCommand({ configuredPath: config.harness?.opencode?.binaryPath });
+  if (openCodeCommand) {
+    logger.info(`[Container] OpenCode CLI found (${openCodeCommand.source}): ${openCodeCommand.path}`);
+  } else {
+    logger.info('[Container] OpenCode CLI not found — install OpenCode 2 or set OPENCODE_BIN to enable the OpenCode provider');
+  }
+
   /** Per-provider construction options, resolved lazily by the registry. */
   const buildHarnessConfig = (type: HarnessType) => ({
     type,
@@ -454,6 +464,17 @@ export async function createContainer(config: AppConfig, options: CreateContaine
       sandboxMode: config.harness?.codex?.sandboxMode ?? 'workspace-write',
       networkAccess: config.harness?.codex?.networkAccess ?? true,
       clientName: 'generatorai',
+      logger,
+    } : undefined,
+    opencode: type === 'opencode' && openCodeCommand ? {
+      // A private `opencode serve --stdio` per GeneratorAI server; the version gate runs when it starts.
+      autoStart: true,
+      binaryPath: openCodeCommand.command,
+      binaryArgs: openCodeCommand.argsPrefix,
+      defaultModel: config.harness?.opencode?.defaultModel,
+      defaultCwd: config.artifactsDir,
+      // GeneratorAI's own config layer for the server it starts (compaction, skill directories).
+      configFile: path.join(dirname(resolve(config.dbPath)), 'opencode', 'generatorai.json'),
       logger,
     } : undefined,
     copilot: type === 'copilot' ? {
