@@ -259,3 +259,55 @@ describe('G15 — spawnBackgroundAgent applies the inherited clamp', () => {
     expect(created[0]!.harnessConfig!.availableTools).toBeUndefined();
   });
 });
+
+// ── The worker's provider follows its model ──────────────────────
+
+describe('spawnBackgroundAgent — the worker runs on the provider of its model', () => {
+  async function spawnWith(model: string, catalog: Array<{ id: string; provider: string }>): Promise<CreateChatParams> {
+    const chatRepo = new MockChatRepository();
+    await chatRepo.create({
+      id: 'parent-1', name: 'Orchestrator', sessionId: 'parent-1-session', status: 'active', orchestratorMode: true,
+      model: 'opus', harnessConfig: { harnessType: 'claude-agent' },
+      createdAt: new Date(), updatedAt: new Date(),
+    } as unknown as Chat);
+    const created: CreateChatParams[] = [];
+    const orchestrator = new OrchestratorService(
+      chatRepo,
+      fakeSessionRepo(),
+      fakeMessageRepo(),
+      {
+        getModels: async () => catalog.map((m) => ({ ...m, name: m.id })),
+        resolveProvider: async ({ model: m }: { model?: string }) => catalog.find((c) => c.id === m)?.provider,
+      } as unknown as IAgentHarness,
+      new EventBus(),
+      { ...DEFAULT_ORCHESTRATOR_CONFIG, warmFirst: false },
+    );
+    orchestrator.setChatManagementService({
+      async createChat(params: CreateChatParams) {
+        created.push(params);
+        return { id: 'w', sessionId: 'w-s', name: params.name } as unknown as Chat;
+      },
+      async sendPrompt() {},
+      async cancelTurn() {},
+    } as unknown as ChatManagementService);
+    const result = await orchestrator.spawnBackgroundAgent('parent-1', { taskName: 't', objective: 'o', model } as never);
+    expect(result.ok).toBe(true);
+    return created[0]!;
+  }
+
+  it("a Claude orchestrator's Codex worker is recorded on Codex, not on the orchestrator's provider", async () => {
+    // Found live: the worker ran on Codex while its record said claude-agent, so the composer made Claude's
+    // capability decisions for it.
+    const params = await spawnWith('gpt-5.6-terra', [{ id: 'sonnet', provider: 'claude-agent' }, { id: 'gpt-5.6-terra', provider: 'codex' }]);
+    expect(params.harnessConfig!.harnessType).toBe('codex');
+    expect(params.harnessConfig!.model).toBe('gpt-5.6-terra');
+  });
+
+  it("stays on the orchestrator's provider when it offers the model too", async () => {
+    const params = await spawnWith('claude-sonnet-5-5', [
+      { id: 'claude-sonnet-5-5', provider: 'copilot' },
+      { id: 'claude-sonnet-5-5', provider: 'claude-agent' },
+    ]);
+    expect(params.harnessConfig!.harnessType).toBe('claude-agent');
+  });
+});

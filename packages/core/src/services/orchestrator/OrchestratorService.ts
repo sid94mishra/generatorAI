@@ -17,7 +17,7 @@ import type {
   BackgroundTaskCancellation,
   BackgroundTaskCancelledBy,
 } from '@generatorai/shared';
-import { TaskResultDigestSchema } from '@generatorai/shared';
+import { HARNESS_PROVIDER_IDS, TaskResultDigestSchema } from '@generatorai/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../../domain/ports/IChatRepository.js';
@@ -26,7 +26,7 @@ import type { IAgentHarness, HarnessModel } from '../../domain/ports/IAgentHarne
 import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
-import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig } from '@generatorai/shared';
+import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig, HarnessProviderId } from '@generatorai/shared';
 import type { TurnPolicy } from '../session/types.js';
 import { WORKER_SYSTEM_PROMPT, renderBriefMessage, renderResumeMessage } from './prompts.js';
 
@@ -726,6 +726,10 @@ export class OrchestratorService {
     // could not. Computed before `createChat` so the clamp is part of the
     // creation, not a correction applied afterwards.
     const inherited = parent.inherited;
+    // The worker's provider follows its model: a Claude orchestrator's Codex worker runs on Codex, and its record has
+    // to say so — the session composer takes the recorded provider for its capability decisions (plan gates,
+    // computer use, prompt preparation), and the transcript and the Tasks dock show it.
+    const workerProvider = workerModel ? await this.workerProviderFor(workerModel, inherited.harnessConfig.harnessType) : undefined;
     let worker;
     try {
       worker = await this.chatManagementService.createChat({
@@ -768,6 +772,7 @@ export class OrchestratorService {
           // win, everything else is the orchestrator's environment.
           ...inherited.harnessConfig,
           ...(workerModel ? { model: workerModel } : {}),
+          ...(workerProvider ? { harnessType: workerProvider } : {}),
           systemMessage: { mode: 'append', content: WORKER_SYSTEM_PROMPT },
         },
       });
@@ -1708,6 +1713,18 @@ export class OrchestratorService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * The provider a worker on `model` runs on: the orchestrator's own when it offers the model (a model two providers
+   * offer stays where the orchestrator is), else the one that does. Undefined when the catalog does not know it.
+   */
+  private async workerProviderFor(model: string, inherited: HarnessProviderId | undefined): Promise<HarnessProviderId | undefined> {
+    const offers = (await this.getModelsCached()).filter((m) => m.id === model);
+    if (offers.length === 0) return undefined;
+    if (inherited && offers.some((m) => m.provider === inherited)) return inherited;
+    const owner = await this.harness.resolveProvider?.({ model });
+    return HARNESS_PROVIDER_IDS.find((id) => id === owner);
   }
 
   /** Cached model-id lookup for per-spawn validation. Returns null on failure. */
