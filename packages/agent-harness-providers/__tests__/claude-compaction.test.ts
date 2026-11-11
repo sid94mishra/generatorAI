@@ -210,6 +210,11 @@ describe('Claude compaction on a persistent session', () => {
     expect((untouched['settings'] as Record<string, unknown> | undefined)?.['autoCompactWindow']).toBeUndefined();
   });
 
+  it('turns off the CLI\'s commit and pull request attribution', () => {
+    const opts = internals.buildQueryOptions({ conversationId: 'c-attr', workingDirectory: '/tmp' }, undefined, { persistent: true });
+    expect((opts['settings'] as Record<string, unknown>)['attribution']).toEqual({ commit: '', pr: '' });
+  });
+
   it('turns "compact at N % full" into the window the CLI compacts below', async () => {
     const { autoCompactWindowFor } = await import('../src/providers/claude-agent/ClaudeAgentProvider.js');
     expect(autoCompactWindowFor({ enabled: true, thresholdPct: 50 }, 1_000_000)).toBe(533_000);

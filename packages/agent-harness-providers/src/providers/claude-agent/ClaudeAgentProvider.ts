@@ -2999,11 +2999,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // user-level settings, where sharing the profile is the point.
     const settings: Record<string, unknown> = {};
     if (!(this.options.settingSources ?? []).includes('user')) settings['autoMemoryEnabled'] = false;
+    // No "Co-Authored-By: Claude" trailer or "Generated with Claude Code" line in the commits and pull
+    // requests the agent makes in the user's repositories (owner decision). The object form, which every
+    // CLI version accepts.
+    settings['attribution'] = { commit: '', pr: '' };
     // The app's auto-compaction switch (docs/compaction §3.6). Manual `/compact` keeps working either way.
     if (config.autoCompact?.enabled === false) settings['autoCompactEnabled'] = false;
     const autoCompactWindow = autoCompactWindowFor(config.autoCompact, this.contextWindowOf(config.model));
     if (autoCompactWindow != null) settings['autoCompactWindow'] = autoCompactWindow;
-    if (Object.keys(settings).length > 0) (options as Record<string, unknown>)['settings'] = settings;
+    (options as Record<string, unknown>)['settings'] = settings;
 
     // RV-9 — native structured output for THIS turn (a workflow stage's final
     // prompt turn). The format is session-scoped in the SDK, so it is only
