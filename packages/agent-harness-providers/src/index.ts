@@ -109,9 +109,20 @@ export type {
 export type { OpenCodeProvider } from './providers/opencode/OpenCodeProvider.js';
 export type { OpenCodeProviderOptions } from './types.js';
 
-// W39 — ACP breadth client (long-tail ACP-compliant agents)
+// W39 — ACP agents (docs/acp): the `acp` provider multiplexes every enabled agent.
+// Type-only for the provider classes (W41: the barrel never loads them or the SDK); the registry,
+// installer and launch helpers below are SDK-free.
 export type { AcpProvider } from './providers/acp/AcpProvider.js';
-export type { AcpProviderOptions } from './types.js';
+export type { AcpAgentConnection, AcpConnectionStatus } from './providers/acp/AcpAgentConnection.js';
+export type { AcpProviderOptions, AcpAgentConnectionOptions, AcpAgentLaunch } from './types.js';
+export {
+  resolveAgentCmd,
+  safeArchiveEntryPath,
+  resolveSpawnTarget,
+  posixCommandLine,
+  powershellCommandLine,
+} from './providers/acp/launch.js';
+export * from './providers/acp/registry/index.js';
 
 // ── W12 — Agent Host Supervisor ──
 // Bounds concurrent provider spawns via execution/cold-start semaphores.

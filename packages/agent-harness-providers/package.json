@@ -51,7 +51,12 @@
     "@agentclientprotocol/sdk": "2.6.0",
     "@generatorai/core": "workspace:*",
     "@generatorai/shared": "workspace:*",
-    "@opentelemetry/api": "^1.9.0"
+    "@opentelemetry/api": "^1.9.0",
+    "saxes": "^6.0.0",
+    "tar": "^7.5.22",
+    "unbzip2-stream": "^1.4.3",
+    "yauzl": "^3.4.0",
+    "zod": "^3.24.0"
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "~0.3.319",
@@ -59,6 +64,7 @@
     "@openai/codex": "0.167.0"
   },
   "devDependencies": {
-    "zod": "^3.24.0"
+    "@types/unbzip2-stream": "^1.4.3",
+    "@types/yauzl": "^3.4.0"
   }
 }
