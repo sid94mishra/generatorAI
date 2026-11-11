@@ -1218,19 +1218,30 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * derived numbers do, and those are applied as an overlay at read time by
    * `probeModels`, so the cache stays valid for its full TTL.
    */
-  private recordObservedLimits(message: unknown): void {
+  private recordObservedLimits(message: unknown, configuredModel?: string): void {
     const modelUsage = (message as { modelUsage?: Record<string, unknown> }).modelUsage;
     if (!modelUsage) return;
-    for (const [model, raw] of Object.entries(modelUsage)) {
-      const u = (raw ?? {}) as { contextWindow?: number; maxOutputTokens?: number };
-      if (typeof u.contextWindow !== 'number' && typeof u.maxOutputTokens !== 'number') continue;
+    type Usage = { contextWindow?: number; maxOutputTokens?: number; inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
+    const record = (model: string, u: Usage): void => {
       const prev = this.observedModelLimits.get(model) ?? {};
       this.observedModelLimits.set(model, {
         ...prev,
         ...(typeof u.contextWindow === 'number' ? { contextWindow: u.contextWindow } : {}),
         ...(typeof u.maxOutputTokens === 'number' ? { maxOutputTokens: u.maxOutputTokens } : {}),
       });
+    };
+    let main: { usage: Usage; tokens: number } | undefined;
+    for (const [model, raw] of Object.entries(modelUsage)) {
+      const u = (raw ?? {}) as Usage;
+      if (typeof u.contextWindow !== 'number' && typeof u.maxOutputTokens !== 'number') continue;
+      record(model, u);
+      const tokens = (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0);
+      if (!main || tokens > main.tokens) main = { usage: u, tokens };
     }
+    // `modelUsage` is keyed by the wire model ("claude-sonnet-5-5"); a chat names an alias ("sonnet") that the
+    // catalog does not always resolve to that key, so the auto-compaction window fell back to 200K — 30 % of a 1M
+    // model compacted at 67K. The turn's main model (most tokens; a sub-agent's Haiku uses fewer) is the alias's.
+    if (configuredModel && !(configuredModel in modelUsage) && main) record(configuredModel, main.usage);
   }
 
   /**
@@ -2304,7 +2315,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
             if (message.type === 'result' && isTerminalEvent(event) && !snapshotSent) {
               snapshotSent = true;
               // Ahead of the terminal event — see `applyMessageToTurn`.
-              this.recordObservedLimits(message);
+              this.recordObservedLimits(message, this.conversations.get(conversationId)?.model);
               await this.emitContextUsageSnapshot(conversationId, message);
             }
             await this.emitEventToHandlers(conversationId, event);
@@ -4130,7 +4141,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         // subscription the moment it sees `harness.idle`, so a snapshot sent
         // afterwards reaches nobody. It did exactly that — the breakdown was
         // computed every turn and the gauge never once showed it.
-        this.recordObservedLimits(message);
+        this.recordObservedLimits(message, this.conversations.get(conversationId)?.model);
         await this.emitContextUsageSnapshot(conversationId, turn.compacted ? undefined : message, queryHandle);
       }
       await this.emitEventToHandlers(conversationId, event);

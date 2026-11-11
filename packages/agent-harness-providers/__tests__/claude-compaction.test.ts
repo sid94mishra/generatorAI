@@ -88,6 +88,7 @@ type Internals = {
   ensureSession: (...args: unknown[]) => Promise<unknown>;
   readSession: (session: unknown) => Promise<void>;
   buildQueryOptions: (config: unknown, turnOptions: unknown, mode: { persistent: boolean }) => Record<string, unknown>;
+  recordObservedLimits: (message: unknown, configuredModel?: string) => void;
 };
 
 describe('Claude compaction on a persistent session', () => {
@@ -218,6 +219,20 @@ describe('Claude compaction on a persistent session', () => {
     expect(autoCompactWindowFor({ enabled: true, thresholdPct: 95 }, 200_000)).toBe(200_000);
     expect(autoCompactWindowFor({ enabled: true }, 200_000)).toBeUndefined();
     expect(autoCompactWindowFor({ enabled: false, thresholdPct: 50 }, 200_000)).toBeUndefined();
+  });
+
+  it("applies the percentage to the window a turn reported, for a chat that names the model by its alias", () => {
+    // Found live: a Sonnet 5.5 chat ("sonnet") at 30 % compacted at 67K — the result reports the window under the
+    // wire model, which the alias did not resolve to, so the threshold came from the 200K fallback.
+    internals.recordObservedLimits({
+      modelUsage: {
+        'claude-sonnet-5-5': { contextWindow: 1_000_000, maxOutputTokens: 128_000, inputTokens: 40_000, outputTokens: 2_000 },
+        'claude-haiku-4-5': { contextWindow: 200_000, maxOutputTokens: 64_000, inputTokens: 900, outputTokens: 50 },
+      },
+    }, 'sonnet');
+    const opts = internals.buildQueryOptions({ conversationId: 'c9', workingDirectory: '/tmp', model: 'sonnet', autoCompact: { enabled: true, thresholdPct: 30 } }, undefined, { persistent: true });
+    // 30 % of 1M plus the CLI's 33K headroom.
+    expect((opts['settings'] as Record<string, unknown>)['autoCompactWindow']).toBe(333_000);
   });
 
   it('declares native compaction with instructions', () => {
