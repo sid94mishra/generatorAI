@@ -22,6 +22,7 @@ import {
   HARNESS_PROVIDER_STABILITY,
   harnessProviderLabel,
   type HarnessProviderId,
+  type HarnessProviderStability,
   type HarnessProviderVisibility,
 } from '@generatorai/shared';
 
@@ -60,12 +61,16 @@ export function normalizeProviderVisibility(raw: unknown): ProviderVisibilitySet
 export function resolveProviderVisibility(
   settings: ProviderVisibilitySettings,
   revealed: ReadonlySet<HarnessProviderId>,
+  stabilities: Readonly<Record<HarnessProviderId, HarnessProviderStability>> = HARNESS_PROVIDER_STABILITY,
 ): HarnessProviderVisibility[] {
   return HARNESS_PROVIDER_IDS.map((type) => {
-    const stability = HARNESS_PROVIDER_STABILITY[type];
+    const stability = stabilities[type];
     const base = { type, label: harnessProviderLabel(type), stability };
     if (revealed.has(type)) return { ...base, visible: true, source: 'env' as const };
-    const chosen = settings.visible[type];
+    // A choice applies to experimental providers only: Settings offers the switch for those alone, so a
+    // "hidden" saved while a provider was experimental would otherwise keep it hidden for good once it is
+    // stable (OpenCode and ACP agents stayed off after they became stable, with no way to turn them on).
+    const chosen = stability === 'experimental' ? settings.visible[type] : undefined;
     if (chosen !== undefined) return { ...base, visible: chosen, source: 'setting' as const };
     return { ...base, visible: stability === 'stable', source: 'default' as const };
   });

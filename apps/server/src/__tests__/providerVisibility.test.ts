@@ -47,6 +47,16 @@ describe('resolveProviderVisibility', () => {
     });
   });
 
+  it('applies a saved choice to experimental providers only', () => {
+    const stabilities = { copilot: 'stable', 'claude-agent': 'stable', codex: 'stable', opencode: 'experimental', acp: 'experimental' } as const;
+    // Hidden while experimental: the choice holds…
+    expect(visibleOf(resolveProviderVisibility({ visible: { opencode: true, acp: false } }, new Set(), stabilities))).toMatchObject({ opencode: true, acp: false });
+    // …and once the provider is stable a "hidden" saved back then no longer hides it (Settings has no switch for it).
+    const stable = resolveProviderVisibility({ visible: { opencode: false, acp: false, codex: false } }, new Set());
+    expect(visibleOf(stable)).toMatchObject({ opencode: true, acp: true, codex: true });
+    expect(stable.find((p) => p.type === 'acp')).toMatchObject({ source: 'default' });
+  });
+
   it('an env reveal wins over a setting that hides the provider', () => {
     const list = resolveProviderVisibility({ visible: { opencode: false } }, new Set(['opencode']));
     expect(list.find((p) => p.type === 'opencode')).toMatchObject({ visible: true, source: 'env', stability: 'stable' });
@@ -60,23 +70,22 @@ describe('resolveProviderVisibility', () => {
 });
 
 describe('ProviderVisibilityStore', () => {
-  it('applies the hidden set at load and after each change, and persists the change', async () => {
+  it('persists a change and re-applies the hidden set; every provider is stable, so nothing is hidden', async () => {
     const applied: string[][] = [];
     const store = await ProviderVisibilityStore.load(dir, {}, (hidden) => applied.push([...hidden].sort()));
     expect(applied.at(-1)).toEqual([]);
 
     await store.update({ opencode: false, codex: false });
-    expect(applied.at(-1)).toEqual(['codex', 'opencode']);
+    expect(applied).toHaveLength(2);
+    expect(applied.at(-1)).toEqual([]);
     expect(JSON.parse(readFileSync(path.join(dir, 'provider-visibility.json'), 'utf8')).visible).toEqual({
       opencode: false,
       codex: false,
     });
 
-    // A restart reads the same choice back; null returns a provider to its default.
+    // A file written while OpenCode and ACP were experimental (both hidden) hides neither after a restart.
     const again = await ProviderVisibilityStore.load(dir, {}, () => undefined);
-    expect(again.hidden().sort()).toEqual(['codex', 'opencode']);
-    await again.update({ codex: null, acp: false });
-    expect(again.hidden().sort()).toEqual(['acp', 'opencode']);
+    expect(again.hidden()).toEqual([]);
   });
 
   it('reads the env reveal list', async () => {
@@ -124,7 +133,7 @@ describe('/api/harness/visibility', () => {
 
     const changed = (await request(app).put('/api/harness/visibility').send({ visible: { opencode: true } }).expect(200))
       .body as HarnessVisibilityResponse;
-    expect(changed.providers.find((p) => p.type === 'opencode')).toMatchObject({ visible: true, source: 'setting' });
+    expect(changed.providers.find((p) => p.type === 'opencode')).toMatchObject({ visible: true, source: 'default' });
     expect(hidden.has('opencode')).toBe(false);
     expect(registry.requestRefresh).toHaveBeenCalled();
   });
