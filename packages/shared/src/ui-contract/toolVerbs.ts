@@ -282,6 +282,8 @@ export function toolStepKind(toolName: string): StepKind {
   // D-182 — before the substring rules, which would fold `run_code` into "Ran N commands".
   if (n === 'run_code') return 'tool';
   if (n === 'todowrite' || n === 'update_plan' || n === 'exit_plan_mode') return 'plan';
+  // OpenCode 2's multi-file edit tool (its `edit` / `write` / `read` / `glob` / `grep` / `shell` fall to the rules below).
+  if (n === 'patch') return 'edit';
   if (isShellTool(n)) return 'run';
   if (n.startsWith('computer_')) return 'computer';
   if (BROWSER_TOOLS.has(n)) return 'browser';
