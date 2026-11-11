@@ -1,539 +1,267 @@
-// ────────────────────────────────────────────────────────────────
-// AcpProvider — regression tests
-// ────────────────────────────────────────────────────────────────
-//
-// W39 — first-ever test coverage for this file. Every test here spawns a
-// REAL child process speaking REAL ACP (JSON-RPC 2.0 over stdio, via
-// `@agentclientprotocol/sdk`) using `fixtures/fakeAcpAgent.mjs` — not a
-// mocked transport — so a regression in the wire protocol itself (message
-// framing, method names, capability negotiation) fails these tests, not
-// just a mock's assumptions about them.
+// docs/acp ACP-1…ACP-3, ACP-8 — the `acp` provider multiplexing real ACP agent processes
+// (fixtures/fakeAcpAgent.mjs over stdio): model discovery from config options, routing by
+// `<agentId>/<value>`, applying model/effort/mode, sign-in gating (-32000), agent and terminal
+// sign-in, resume across processes, the live agent set, attachments and MCP servers.
 
-import { describe, expect, it, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import type { CreateConversationParams } from '@generatorai/core';
+import type { AcpAgentLaunch } from '../../../types.js';
 import { AcpProvider } from '../AcpProvider.js';
-import { runCapabilityDeclarationConformance, runFullConformance } from '../../../conformance/index.js';
-import type { AgentEvent } from '@generatorai/shared';
-import type { CreateConversationParams, PermissionResponse } from '@generatorai/core';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_AGENT = join(__dirname, 'fixtures', 'fakeAcpAgent.mjs');
+const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fakeAcpAgent.mjs');
 
-function collect(provider: AcpProvider, conversationId: string): { events: AgentEvent[]; stop: () => void } {
-  const events: AgentEvent[] = [];
-  const stop = provider.onConversationEvent(conversationId, (e) => events.push(e));
-  return { events, stop };
+function agent(id: string, env: Record<string, string> = {}): AcpAgentLaunch {
+  return { id, label: id[0]!.toUpperCase() + id.slice(1), command: process.execPath, args: [FIXTURE], env, tierB: false };
 }
 
-describe('AcpProvider (real JSON-RPC-over-stdio ACP)', () => {
-  const liveProviders: AcpProvider[] = [];
+const live: AcpProvider[] = [];
+let dir: string;
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(os.tmpdir(), 'gai-acp-mux-'));
+});
+afterEach(async () => {
+  await Promise.all(live.splice(0).map((p) => p.shutdown().catch(() => undefined)));
+  await rm(dir, { recursive: true, force: true });
+});
 
-  function makeProvider(opts: ConstructorParameters<typeof AcpProvider>[0] = { command: process.execPath, args: [FIXTURE_AGENT] }): AcpProvider {
-    const p = new AcpProvider(opts);
-    liveProviders.push(p);
-    return p;
-  }
+async function started(agents: AcpAgentLaunch[], onChange?: () => void): Promise<AcpProvider> {
+  const p = new AcpProvider({ agents, requestTimeoutMs: 10_000, ...(onChange ? { onChange } : {}) });
+  live.push(p);
+  await p.initialize();
+  return p;
+}
 
-  afterEach(async () => {
-    await Promise.all(liveProviders.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
+const conv = (id: string, extra: Partial<CreateConversationParams> = {}) => ({ conversationId: id, ...extra }) as CreateConversationParams;
+const echo = async (p: AcpProvider, id: string, what: string) => JSON.parse((await p.sendPromptAndWait(id, what)).content) as Record<string, unknown>;
+
+describe('AcpProvider — catalog (ACP-2/3/9)', () => {
+  it('with no agent enabled lists nothing and says why', async () => {
+    const p = await started([]);
+    expect(await p.getModels()).toEqual([]);
+    expect(p.getLastModelProbeError()).toMatch(/No ACP agents enabled/);
+    expect(p.getSubProviders()).toEqual([]);
   });
 
-  it('spawns the agent, negotiates the real ACP protocol version, and reaches "running"', async () => {
-    const provider = makeProvider();
-    expect(provider.getClientState()).toBe('starting');
-    await provider.initialize();
-    expect(provider.getClientState()).toBe('running');
-    await expect(provider.ping()).resolves.toBe(true);
-  }, 10_000);
+  it('lists every enabled agent’s models as <agentId>/<value> with subProvider; an agent without a model option offers its default', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_MODELS: '1' }), agent('beta')]);
+    const models = await p.getModels();
+    expect(models.map((m) => [m.id, m.subProvider, m.provider])).toEqual([
+      ['alpha/fast', 'alpha', 'acp'],
+      ['alpha/smart', 'alpha', 'acp'],
+      ['beta', 'beta', 'acp'],
+    ]);
+    expect(models[0]).toMatchObject({ name: 'Fast', category: 'Fast models', isDefault: true, reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium' });
+    expect(models[1]).toMatchObject({ category: 'Smart models' });
+    expect(models[1]!.reasoningEfforts).toBeUndefined();
+    expect(models[2]).toMatchObject({ name: "Beta (agent's default model)" });
+    expect(p.getSubProviders()).toEqual([
+      expect.objectContaining({ id: 'alpha', label: 'Alpha', ready: true, connected: true, authState: 'not_required', authenticated: true, modelCount: 2 }),
+      expect.objectContaining({ id: 'beta', ready: true, modelCount: 1 }),
+    ]);
+  }, 20_000);
 
-  it('fails initialize() with a helpful error when the binary does not exist (ENOENT)', async () => {
-    const provider = makeProvider({ command: 'generatorai-acp-binary-that-does-not-exist-xyz' });
-    await expect(provider.initialize()).rejects.toThrow(/not found/i);
-    expect(provider.getClientState()).toBe('error');
-  }, 10_000);
+  it('uses session/options when advertised (no throwaway session)', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_MODELS: '1', FAKE_ACP_SESSION_OPTIONS: '1' })]);
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['alpha/fast', 'alpha/smart']);
+  }, 20_000);
 
-  it('declares capabilities honestly, including computerUse (L9/L16)', async () => {
-    const provider = makeProvider();
-    await provider.initialize();
-    const caps = provider.capabilities();
-    expect(caps.computerUse).toBe(false);
-    expect(caps.approvalGating).toBe('per_call'); // session/request_permission reaches the gate per call
-    expect(() => runCapabilityDeclarationConformance(provider)).not.toThrow();
-  }, 10_000);
-
-  it('streams a real turn end-to-end: tokens, then harness.idle, then the final content', async () => {
-    const provider = makeProvider();
-    await provider.initialize();
-    const id = 'conv-basic';
-    await provider.createConversation({ conversationId: id } as CreateConversationParams);
-    expect(provider.hasLiveConversation(id)).toBe(true);
-    expect(provider.getConversationWarnings(id)).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER' })]),
-    );
-
-    const { events, stop } = collect(provider, id);
-    const response = await provider.sendPromptAndWait(id, 'hello, agent');
-    stop();
-
-    expect(response.content).toContain('Hello from fake agent.');
-    const kinds = events.map((e) => e.kind);
-    expect(kinds).toContain('harness.token');
-    expect(kinds[kinds.length - 1]).toBe('harness.idle');
-  }, 10_000);
-
-  it('L16 Tier-B gate denies an "execute" tool call before the agent ever sees an approval', async () => {
-    const provider = makeProvider(); // tierB defaults true
-    await provider.initialize();
-    const id = 'conv-tierb-blocked';
-    await provider.createConversation({ conversationId: id } as CreateConversationParams);
-
-    const { events, stop } = collect(provider, id);
-    await provider.sendPromptAndWait(id, 'please TOOL:execute this');
-    stop();
-
-    const toolStart = events.find((e) => e.kind === 'harness.tool_start');
-    expect(toolStart).toBeDefined();
-    const completions = events.filter(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    expect(completions.length).toBeGreaterThan(0);
-    // Every completion for the blocked call must be a failure — a Tier-B
-    // agent must never see one of its execute calls reported as succeeded.
-    expect(completions.every((e) => e.data.success === false)).toBe(true);
-  }, 10_000);
-
-  it('default-approves a non-blocked ("read") tool call when no domain callback is wired', async () => {
-    const provider = makeProvider();
-    await provider.initialize();
-    const id = 'conv-tierb-allowed';
-    await provider.createConversation({ conversationId: id } as CreateConversationParams);
-
-    const { events, stop } = collect(provider, id);
-    await provider.sendPromptAndWait(id, 'please TOOL:read this');
-    stop();
-
-    const completions = events.filter(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    expect(completions.length).toBeGreaterThan(0);
-    expect(completions.some((e) => e.data.success === true)).toBe(true);
-  }, 10_000);
-
-  it('honours a wired onPermissionRequest callback that denies a non-blocked tool call', async () => {
-    const provider = makeProvider({ command: process.execPath, args: [FIXTURE_AGENT], tierB: false });
-    await provider.initialize();
-    const id = 'conv-domain-deny';
-    const decisions: string[] = [];
-    const onPermissionRequest = async (): Promise<PermissionResponse> => {
-      decisions.push('called');
-      return { granted: false, reason: 'test denies everything' };
-    };
-    await provider.createConversation({ conversationId: id, onPermissionRequest } as CreateConversationParams);
-
-    const { events, stop } = collect(provider, id);
-    await provider.sendPromptAndWait(id, 'please TOOL:read this');
-    stop();
-
-    expect(decisions).toEqual(['called']);
-    const completions = events.filter(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    expect(completions.every((e) => e.data.success === false)).toBe(true);
-  }, 10_000);
-
-  it('W13: abortConversation() emits harness.cancelled and resolves the turn instead of throwing', async () => {
-    const provider = makeProvider();
-    await provider.initialize();
-    const id = 'conv-cancel';
-    await provider.createConversation({ conversationId: id } as CreateConversationParams);
-
-    const { events, stop } = collect(provider, id);
-    const turnPromise = provider.sendPromptAndWait(id, 'CANCEL_ME please');
-    // Let the fake agent reach its "waiting to be cancelled" state.
-    await new Promise((r) => setTimeout(r, 100));
-    await provider.abortConversation(id);
-
-    await expect(turnPromise).resolves.toBeDefined();
-    stop();
-
-    expect(events.map((e) => e.kind)).toContain('harness.cancelled');
-  }, 10_000);
-
-  it('deleteConversation() disposes the session and shutdown() ends the process', async () => {
-    const provider = makeProvider();
-    await provider.initialize();
-    const id = 'conv-lifecycle';
-    await provider.createConversation({ conversationId: id } as CreateConversationParams);
-    expect(provider.hasLiveConversation(id)).toBe(true);
-    await provider.deleteConversation(id);
-    expect(provider.hasLiveConversation(id)).toBe(false);
-    await provider.shutdown();
-    expect(provider.getClientState()).toBe('stopped');
-  }, 10_000);
-
-  it('passes ALL FIVE W44 conformance suites', async () => {
-    // Only `runCapabilityDeclarationConformance` was ever pointed at this
-    // provider; the other three were typed `(faux: FauxProvider)`.
-    // `tierB: false` so the tool-call suite's `read` is approved by the
-    // trusted-agent path rather than the host gate — the gate has its own
-    // suite below.
-    const p = makeProvider({ command: process.execPath, args: [FIXTURE_AGENT], tierB: false });
-    await p.initialize();
-    await expect(runFullConformance(p, {
-      toolCall: { prompt: 'please TOOL:read this' },
-      cancellationInBand: { prompt: 'SERVER_CANCEL now' },
-      cancellationCallerAbort: {
-        prompt: 'CANCEL_ME please',
-        duringTurn: (harness, id) => (harness as AcpProvider).abortConversation(id),
-      },
-      // ACP's `StopReason` includes `max_tokens`. Running this suite is what
-      // revealed that AcpProvider had no W13-B1 guard for it at all: a turn
-      // truncated mid-tool-call emitted `harness.idle` and left the call
-      // dangling, so the agent waited forever for a result that never came.
-      truncation: { prompt: 'please TRUNCATE this' },
-    })).resolves.toBeUndefined();
+  it('the agent set is live: an added agent starts, a removed one stops and leaves the catalog', async () => {
+    const changes: number[] = [];
+    const p = await started([agent('alpha')], () => changes.push(1));
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['alpha']);
+    await p.setAgents([agent('alpha'), agent('beta', { FAKE_ACP_MODELS: '1' })]);
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['alpha', 'beta/fast', 'beta/smart']);
+    await p.setAgents([agent('beta', { FAKE_ACP_MODELS: '1' })]);
+    expect((await p.getModels()).map((m) => m.subProvider)).toEqual(['beta', 'beta']);
+    expect(p.peekAgent('alpha')).toBeNull();
+    expect(changes.length).toBeGreaterThan(0);
   }, 30_000);
-});
 
-// ── L16: the Tier-B gate is a fail-CLOSED allowlist ──
-
-describe('AcpProvider — L16 Tier-B gate is an opt-in allowlist, denied by default', () => {
-  const liveProviders: AcpProvider[] = [];
-  afterEach(async () => {
-    await Promise.all(liveProviders.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
-  });
-  function provider(opts: Partial<ConstructorParameters<typeof AcpProvider>[0]> = {}): AcpProvider {
-    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], ...opts });
-    liveProviders.push(p);
-    return p;
-  }
-
-  /** Run one `TOOL:<kind>` turn and report whether the call was approved. */
-  async function runToolKind(p: AcpProvider, id: string, prompt: string): Promise<boolean> {
-    await p.createConversation({ conversationId: id } as CreateConversationParams);
-    const { events, stop } = collect(p, id);
-    await p.sendPromptAndWait(id, prompt);
-    stop();
-    const completions = events.filter(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    expect(completions.length).toBeGreaterThan(0);
-    return completions.every((e) => e.data.success === true);
-  }
-
-  // The old gate was a substring DENYLIST over 'computer-use'/'screen'/'mouse'/
-  // 'keyboard-input'. Everything it did not name fell through to
-  // default-approve — so an untrusted agent could delete files unattended.
-  it.each(['edit', 'delete', 'move', 'fetch', 'execute', 'switch_mode', 'other'])(
-    'denies kind "%s" for a Tier-B agent',
-    async (kind) => {
-      const p = provider();
-      await p.initialize();
-      await expect(runToolKind(p, `deny-${kind}`, `please TOOL:${kind} this`)).resolves.toBe(false);
-    },
-    15_000,
-  );
-
-  it.each(['read', 'search', 'think'])('allows kind "%s" for a Tier-B agent', async (kind) => {
-    const p = provider();
-    await p.initialize();
-    await expect(runToolKind(p, `allow-${kind}`, `please TOOL:${kind} this`)).resolves.toBe(true);
-  }, 15_000);
-
-  it('ignores the model-controlled title entirely — a benign title cannot launder a delete', async () => {
-    // Under the old denylist an agent got its call approved by simply not
-    // putting a blocked keyword in the title it wrote itself.
-    const p = provider();
-    await p.initialize();
-    await expect(runToolKind(p, 'deny-laundered', 'please TOOL:delete TITLE:ReadTheDocs this'))
-      .resolves.toBe(false);
-  }, 15_000);
-
-  it('and a scary title cannot block an allowed kind either — kind is the only input', async () => {
-    const p = provider();
-    await p.initialize();
-    await expect(runToolKind(p, 'allow-scary-title', 'please TOOL:read TITLE:computer-use-mouse-screen this'))
-      .resolves.toBe(true);
-  }, 15_000);
-
-  it('a non-Tier-B agent is not subject to the allowlist', async () => {
-    const p = provider({ tierB: false });
-    await p.initialize();
-    await expect(runToolKind(p, 'trusted-edit', 'please TOOL:edit this')).resolves.toBe(true);
-  }, 15_000);
-});
-
-// ── The permission gate cannot fail open ──
-
-describe('AcpProvider — the permission gate denies on error and on timeout', () => {
-  const liveProviders: AcpProvider[] = [];
-  afterEach(async () => {
-    await Promise.all(liveProviders.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
-  });
-  function provider(opts: Partial<ConstructorParameters<typeof AcpProvider>[0]> = {}): AcpProvider {
-    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], tierB: false, ...opts });
-    liveProviders.push(p);
-    return p;
-  }
-
-  async function toolApproved(p: AcpProvider, id: string, params: Partial<CreateConversationParams>): Promise<boolean> {
-    await p.createConversation({ conversationId: id, ...params } as CreateConversationParams);
-    const { events, stop } = collect(p, id);
-    await p.sendPromptAndWait(id, 'please TOOL:read this');
-    stop();
-    const completions = events.filter(
-      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
-    );
-    expect(completions.length).toBeGreaterThan(0);
-    return completions.every((e) => e.data.success === true);
-  }
-
-  it('DENIES when the domain callback throws (a throw used to escape as -32603, which grants nothing but denies nothing either)', async () => {
-    const p = provider();
-    await p.initialize();
-    const approved = await toolApproved(p, 'gate-throws', {
-      onPermissionRequest: async (): Promise<PermissionResponse> => {
-        throw new Error('permission service unavailable');
-      },
-    });
-    expect(approved).toBe(false);
-    // …and the turn still completes rather than wedging on an errored request.
-    expect(p.getClientState()).toBe('running');
-  }, 15_000);
-
-  it('DENIES when the domain callback never answers, after permissionTimeoutMs', async () => {
-    const p = provider({ permissionTimeoutMs: 300 });
-    await p.initialize();
-    const approved = await toolApproved(p, 'gate-hangs', {
-      onPermissionRequest: () => new Promise<PermissionResponse>(() => { /* never settles */ }),
-    });
-    expect(approved).toBe(false);
-  }, 15_000);
-});
-
-// ── Lifecycle correctness ──
-
-describe('AcpProvider — lifecycle hardening', () => {
-  const liveProviders: AcpProvider[] = [];
-  afterEach(async () => {
-    await Promise.all(liveProviders.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
-  });
-  function provider(opts: Partial<ConstructorParameters<typeof AcpProvider>[0]> = {}): AcpProvider {
-    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], ...opts });
-    liveProviders.push(p);
-    return p;
-  }
-
-  it('a clean SIGTERM shutdown does not report client.error', async () => {
-    const p = provider();
-    const clientEvents: string[] = [];
-    p.onClientEvent((e) => clientEvents.push(e.type));
-    await p.initialize();
-    await p.shutdown();
-    // `kill('SIGTERM')` gives `code === null`; the old handler read that as
-    // "not 0" and flipped the state straight back to 'error'.
-    await new Promise((r) => setTimeout(r, 300));
-    expect(p.getClientState()).toBe('stopped');
-    expect(clientEvents).not.toContain('client.error');
-  }, 15_000);
-
-  it('initialize() times out on an agent that never answers the handshake, and tears the child down', async () => {
-    const p = provider({ env: { FAKE_ACP_NO_INIT: '1' }, requestTimeoutMs: 400 });
-    await expect(p.initialize()).rejects.toThrow(/timed out/i);
-    expect(p.getClientState()).toBe('error');
-    // A failed handshake used to leave `connection` and `proc` non-null with
-    // listeners attached, so the provider looked half-alive.
-    await expect(p.ping()).resolves.toBe(false);
-  }, 15_000);
-
-  it('createConversation() times out on an agent that never answers session/new, and warns instead of hanging', async () => {
-    // Long enough that the (answered) handshake completes, short enough that
-    // the (unanswered) session/new deadline fires inside the test budget.
-    const p = provider({ env: { FAKE_ACP_NO_SESSION_NEW: '1' }, requestTimeoutMs: 3_000 });
-    await p.initialize();
-    await p.createConversation({ conversationId: 'no-session' } as CreateConversationParams);
-    expect(p.hasLiveConversation('no-session')).toBe(false);
-    expect(JSON.stringify(p.getConversationWarnings('no-session'))).toMatch(/timed out/i);
-  }, 15_000);
-
-  it('a pre-aborted signal cancels without ever prompting the agent', async () => {
-    const p = provider();
-    await p.initialize();
-    await p.createConversation({ conversationId: 'pre-abort' } as CreateConversationParams);
-    const { events, stop } = collect(p, 'pre-abort');
-    const res = await p.sendPromptAndWait('pre-abort', 'hello', undefined, AbortSignal.abort());
-    stop();
-    expect(res).toEqual({ content: '' });
-    // The agent's greeting would be here if the prompt had actually been sent.
-    expect(events.map((e) => e.kind)).toEqual(['harness.cancelled']);
-  }, 15_000);
-
-  it('sendPrompt() reports failure as harness.error rather than an unhandled rejection', async () => {
-    const p = provider();
-    await p.initialize();
-    const rejections: unknown[] = [];
-    const onRejection = (e: unknown): void => { rejections.push(e); };
-    process.on('unhandledRejection', onRejection);
-    try {
-      await p.sendPrompt('conversation-that-does-not-exist', 'hi');
-      await new Promise((r) => setTimeout(r, 50));
-    } finally {
-      process.off('unhandledRejection', onRejection);
-    }
-    expect(rejections).toEqual([]);
-  }, 15_000);
-});
-
-// ── The chat's mounts must reach `session/new` ──
-//
-// ACP models extra workspace roots natively
-// (`NewSessionRequest.additionalDirectories`, exposed by the SDK as
-// `SessionBuilder.withAdditionalDirectories`), but `buildSession(cwd)` sends
-// only the cwd — so the field was silently dropped. The fixture echoes the
-// `session/new` request it received, so these assert the wire.
-
-describe('AcpProvider — session/new carries the chat workspace', () => {
-  const liveProviders: AcpProvider[] = [];
-  afterEach(async () => {
-    await Promise.all(liveProviders.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
-  });
-
-  async function newSessionRequest(
-    params: Partial<CreateConversationParams>,
-    opts: Partial<ConstructorParameters<typeof AcpProvider>[0]> = {},
-  ): Promise<Record<string, unknown>> {
-    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], ...opts });
-    liveProviders.push(p);
-    await p.initialize();
-    const id = String(params.conversationId ?? 'conv-echo');
-    await p.createConversation({ conversationId: id, ...params } as CreateConversationParams);
-    const { content } = await p.sendPromptAndWait(id, 'ECHO_SESSION');
-    return JSON.parse(content) as Record<string, unknown>;
-  }
-
-  it('sends additionalDirectories alongside cwd', async () => {
-    const req = await newSessionRequest({
-      conversationId: 'conv-dirs',
-      workingDirectory: '/work/repo',
-      additionalDirectories: ['/work/docs', '/work/.generatorai/scratch'],
-    });
-
-    expect(req['cwd']).toBe('/work/repo');
-    expect(req['additionalDirectories']).toEqual(['/work/docs', '/work/.generatorai/scratch']);
-  }, 15_000);
-
-  it('de-duplicates the roots and omits the field entirely when there are none', async () => {
-    const dupes = await newSessionRequest({
-      conversationId: 'conv-dupes',
-      workingDirectory: '/work/repo',
-      additionalDirectories: ['/work/docs', '/work/docs'],
-    });
-    expect(dupes['additionalDirectories']).toEqual(['/work/docs']);
-
-    const none = await newSessionRequest({ conversationId: 'conv-none', workingDirectory: '/work/repo' });
-    expect(none['additionalDirectories']).toBeUndefined();
+  it('a launch that cannot start is that agent’s error, not the provider’s', async () => {
+    const p = await started([agent('alpha'), { id: 'ghost', label: 'Ghost', command: path.join(dir, 'no-such-agent'), args: [] }]);
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['alpha']);
+    const ghost = p.getSubProviders().find((s) => s.id === 'ghost')!;
+    expect(ghost).toMatchObject({ ready: false, connected: false, installed: false });
+    expect(ghost.error).toMatch(/not found/);
   }, 20_000);
 });
 
-describe('AcpProvider — compaction (docs/compaction)', () => {
-  const live: AcpProvider[] = [];
-  afterEach(async () => {
-    await Promise.all(live.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
-  });
+describe('AcpProvider — routing and config (ACP-1/2)', () => {
+  it('routes by model prefix, applies model + effort on creation, and changes them mid-chat', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_MODELS: '1' }), agent('beta')]);
+    await p.getModels();
+    await p.createConversation(conv('c1', { model: 'alpha/smart', reasoningEffort: 'high' }));
+    expect(await echo(p, 'c1', 'ECHO_CONFIG')).toEqual({ model: 'smart', effort: 'high', mode: 'code' });
+    // The smart model offers `max`: the conversation's capabilities follow its options.
+    expect(p.capabilitiesFor('c1').reasoningEfforts).toEqual(['low', 'medium', 'high', 'max']);
 
-  async function started(env: Record<string, string> = {}): Promise<AcpProvider> {
-    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], env });
-    live.push(p);
-    await p.initialize();
-    return p;
-  }
-  const infos = (events: AgentEvent[]) =>
-    events
-      .filter((e) => e.kind === 'harness.session_info')
-      .map((e) => e.data as { infoType: string; trigger?: string; summary?: string; error?: string })
-      .filter((d) => d.infoType.startsWith('compact'));
-  const tokens = (events: AgentEvent[]) =>
-    events.filter((e) => e.kind === 'harness.token').map((e) => (e.data as { text: string }).text).join('');
-  /** The agent's commands follow `session/new`; wait until the pump has applied them. */
-  async function untilCompactable(p: AcpProvider, id: string): Promise<void> {
-    for (let i = 0; i < 50 && !p.capabilitiesFor(id).conversationCompact; i++) await new Promise((r) => setTimeout(r, 20));
-  }
+    await p.resumeConversation('c1', conv('c1', { model: 'alpha/fast', reasoningEffort: 'low' }));
+    expect(await echo(p, 'c1', 'ECHO_CONFIG')).toEqual({ model: 'fast', effort: 'low', mode: 'code' });
+    expect(p.getConversationWarnings('c1').some((w) => w.code === 'CONVERSATION_RESTARTED')).toBe(false);
 
-  it('declares the session.compaction client capability', async () => {
-    const p = await started();
-    await p.createConversation({ conversationId: 'caps' } as CreateConversationParams);
-    const { events } = collect(p, 'caps');
-    await p.sendPromptAndWait('caps', 'ECHO_CLIENT_CAPS');
-    expect(JSON.parse(tokens(events))).toMatchObject({ session: { compaction: {} } });
-  }, 15_000);
+    await p.createConversation(conv('c2', { model: 'beta' }));
+    expect(p.getProviderSessionId('c2')).toMatch(/^beta\//);
+    expect((await p.sendPromptAndWait('c2', 'hi')).content).toBe('Hello from fake agent.');
+  }, 30_000);
 
-  it('offers compaction only for an agent advertising `compact`, read before any prompt', async () => {
-    const plain = await started();
-    await plain.createConversation({ conversationId: 'plain' } as CreateConversationParams);
-    await new Promise((r) => setTimeout(r, 150));
-    expect(plain.capabilities().conversationCompact).toBe(false);
-    expect(plain.capabilitiesFor('plain').conversationCompact).toBe(false);
-    await expect(plain.compactConversation('plain')).rejects.toThrow(/no `compact` command/);
+  it('passes the chosen model as initial configOptions when the agent accepts them', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_MODELS: '1', FAKE_ACP_SESSION_OPTIONS: '1' })]);
+    await p.getModels();
+    await p.createConversation(conv('c1', { model: 'alpha/smart' }));
+    expect((await echo(p, 'c1', 'ECHO_SESSION'))['configOptions']).toEqual([{ configId: 'model', value: 'smart' }]);
+    expect(await echo(p, 'c1', 'ECHO_CONFIG')).toMatchObject({ model: 'smart' });
+  }, 20_000);
 
-    const p = await started({ FAKE_ACP_COMMANDS: 'compact' });
-    await p.createConversation({ conversationId: 'cmd' } as CreateConversationParams);
-    const { events } = collect(p, 'cmd');
-    await untilCompactable(p, 'cmd');
-    expect(p.capabilitiesFor('cmd')).toMatchObject({ conversationCompact: true, compactInstructions: true });
-    // The usage the agent reported between prompts reached the gauge.
-    expect(events).toContainEqual(expect.objectContaining({
-      kind: 'harness.context_usage',
-      data: expect.objectContaining({ currentTokens: 90000, promptTokenLimit: 200000, source: 'provider' }),
+  it('moving a chat to another agent starts a session there and reports the restart', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_MODELS: '1' }), agent('beta')]);
+    await p.createConversation(conv('c1', { model: 'alpha/fast' }));
+    await p.resumeConversation('c1', conv('c1', { model: 'beta' }));
+    expect(p.getProviderSessionId('c1')).toMatch(/^beta\//);
+    expect(p.getConversationWarnings('c1')).toContainEqual(expect.objectContaining({ code: 'CONVERSATION_RESTARTED' }));
+    expect((await p.sendPromptAndWait('c1', 'hi')).content).toBe('Hello from fake agent.');
+  }, 20_000);
+
+  it("plan turns switch to the agent's plan mode and the next turn restores the mode", async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_MODELS: '1' })]);
+    await p.createConversation(conv('c1', { model: 'alpha/fast' }));
+    const planning = JSON.parse((await p.sendPromptAndWait('c1', 'ECHO_CONFIG', undefined, undefined, { agentMode: 'plan' })).content);
+    expect(planning.mode).toBe('plan');
+    expect((await echo(p, 'c1', 'ECHO_CONFIG'))['mode']).toBe('code');
+  }, 20_000);
+
+  it('sends images and text files as content blocks, and stdio + http MCP servers on session/new', async () => {
+    const p = await started([agent('alpha')]);
+    const png = path.join(dir, 'shot.png');
+    const notes = path.join(dir, 'notes.md');
+    await writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await writeFile(notes, '# hi');
+    await p.createConversation(conv('c1', {
+      mcpServers: {
+        files: { type: 'stdio', command: 'mcp-files', args: ['--root', '/x'], env: { A: '1' } },
+        web: { type: 'http', url: 'https://mcp.example/x', headers: { Authorization: 'Bearer t' } },
+        old: { type: 'sse', url: 'https://mcp.example/sse' },
+      },
+      systemMessage: { mode: 'append', content: 'Be brief.' },
     }));
-  }, 15_000);
+    const session = await echo(p, 'c1', 'ECHO_SESSION');
+    expect(session['mcpServers']).toEqual([
+      { name: 'files', command: 'mcp-files', args: ['--root', '/x'], env: [{ name: 'A', value: '1' }] },
+      { type: 'http', name: 'web', url: 'https://mcp.example/x', headers: [{ name: 'Authorization', value: 'Bearer t' }] },
+    ]);
+    expect(session['systemPrompt']).toEqual({ mode: 'append', content: [{ type: 'text', text: 'Be brief.' }] });
+    expect(p.getConversationWarnings('c1')).toContainEqual(expect.objectContaining({ params: expect.objectContaining({ field: 'mcpServers.old' }) }));
 
-  it("compacts with `/compact <instructions>` and reports the agent's compaction_update once", async () => {
-    const p = await started({ FAKE_ACP_COMMANDS: 'compact', FAKE_ACP_COMPACTION_UPDATES: '1' });
-    await p.createConversation({ conversationId: 'manual' } as CreateConversationParams);
-    await untilCompactable(p, 'manual');
-    const { events } = collect(p, 'manual');
-    await p.compactConversation('manual', { instructions: 'keep the API notes' });
-    expect(tokens(events)).toBe('ran /compact keep the API notes');
-    expect(infos(events).map((d) => `${d.infoType}:${d.trigger}`)).toEqual(['compaction_start:manual', 'compact_boundary:manual']);
-    expect(infos(events)[1]?.summary).toBe('the summary');
-    expect(events.at(-1)?.kind).toBe('harness.idle');
-    expect(events).toContainEqual(expect.objectContaining({ kind: 'harness.context_usage', data: expect.objectContaining({ currentTokens: 1200 }) }));
-  }, 15_000);
+    const blocks = JSON.parse((await p.sendPromptAndWait('c1', 'ECHO_PROMPT', [
+      { type: 'file', path: png, mimeType: 'image/png' },
+      { type: 'file', path: notes },
+    ])).content) as Array<Record<string, unknown>>;
+    expect(blocks[0]).toEqual({ type: 'text', text: 'ECHO_PROMPT' });
+    expect(blocks[1]).toMatchObject({ type: 'image', mimeType: 'image/png', data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64') });
+    expect(blocks[2]).toMatchObject({ type: 'resource', resource: { text: '# hi' } });
+  }, 20_000);
 
-  it('reports the end itself when the agent sends no compaction_update', async () => {
-    const p = await started({ FAKE_ACP_COMMANDS: 'compact' });
-    await p.createConversation({ conversationId: 'silent' } as CreateConversationParams);
-    await untilCompactable(p, 'silent');
-    const { events } = collect(p, 'silent');
-    await p.compactConversation('silent');
-    expect(infos(events).map((d) => d.infoType)).toEqual(['compaction_start', 'compact_boundary']);
-  }, 15_000);
+  it('omits additionalDirectories (with a warning) for an agent that does not advertise them', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_NO_ADDITIONAL_DIRS: '1' })]);
+    await p.createConversation(conv('c1', { workingDirectory: dir, additionalDirectories: ['/work/docs'] }));
+    expect((await echo(p, 'c1', 'ECHO_SESSION'))['additionalDirectories']).toBeUndefined();
+    expect(p.getConversationWarnings('c1')).toContainEqual(expect.objectContaining({ params: expect.objectContaining({ field: 'additionalDirectories' }) }));
+  }, 20_000);
+});
 
-  it('reports a failed compaction', async () => {
-    const p = await started({ FAKE_ACP_COMMANDS: 'compact', FAKE_ACP_COMPACTION_UPDATES: '1', FAKE_ACP_COMPACTION_FAIL: '1' });
-    await p.createConversation({ conversationId: 'failing' } as CreateConversationParams);
-    await untilCompactable(p, 'failing');
-    const { events } = collect(p, 'failing');
-    await p.compactConversation('failing');
-    expect(infos(events).map((d) => d.infoType)).toEqual(['compaction_start', 'compaction_failed']);
-    expect(infos(events)[1]?.error).toBe('summary model unavailable');
-  }, 15_000);
+describe('AcpProvider — sign-in (ACP-8)', () => {
+  it('a -32000 agent is signed out with no models (never an empty-but-ready catalog); authenticate signs it in', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_AUTH: 'agent', FAKE_ACP_MODELS: '1' }), agent('beta')]);
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['beta']);
+    const alpha = () => p.getSubProviders().find((s) => s.id === 'alpha')!;
+    expect(alpha()).toMatchObject({ authState: 'unauthenticated', authenticated: false, ready: false, modelCount: 0 });
+    expect(alpha().error).toMatch(/Sign in/);
+    expect(p.agentStatus('alpha')!.authMethods).toEqual([{ id: 'browser', name: 'Sign in with a browser' }]);
 
-  it("reports the agent's own compaction inside a turn as auto", async () => {
-    const p = await started();
-    await p.createConversation({ conversationId: 'auto' } as CreateConversationParams);
-    const { events } = collect(p, 'auto');
-    await p.sendPromptAndWait('auto', 'AUTO_COMPACT');
-    expect(infos(events).map((d) => `${d.infoType}:${d.trigger}`)).toEqual(['compaction_start:auto', 'compact_boundary:auto']);
-    expect(tokens(events)).toBe('Hello from fake agent.');
-  }, 15_000);
+    await p.ensureAgent('alpha').then((c) => c.authenticate('browser'));
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['alpha/fast', 'alpha/smart', 'beta']);
+    expect(alpha()).toMatchObject({ authState: 'authenticated', ready: true });
+  }, 20_000);
 
-  it('says the auto-compaction setting is not applied', async () => {
-    const p = await started();
-    await p.createConversation({ conversationId: 'ac', autoCompact: { enabled: false } } as CreateConversationParams);
-    expect(p.getConversationWarnings('ac')).toContainEqual(
-      expect.objectContaining({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: expect.objectContaining({ field: 'autoCompact' }) }),
-    );
-  }, 15_000);
+  it('reads auth/status when advertised, and signs out with logout', async () => {
+    const p = await started([agent('alpha', { FAKE_ACP_AUTH: 'agent', FAKE_ACP_AUTH_STATUS: '1', FAKE_ACP_LOGOUT: '1' })]);
+    expect(p.agentStatus('alpha')).toMatchObject({ authState: 'unauthenticated', supportsLogout: true });
+    const c = await p.ensureAgent('alpha');
+    await c.authenticate('browser');
+    expect(p.agentStatus('alpha')!.authState).toBe('authenticated');
+    await c.logout();
+    expect(p.agentStatus('alpha')!.authState).toBe('unauthenticated');
+    expect(await p.getModels()).toEqual([]);
+  }, 20_000);
+
+  it('a terminal method is the agent’s own command + its args; after it exits 0 a restart is signed in', async () => {
+    const authFile = path.join(dir, 'signed-in');
+    const env = { FAKE_ACP_AUTH: 'terminal', FAKE_ACP_AUTH_FILE: authFile };
+    const p = await started([agent('alpha', env)]);
+    expect(await p.getModels()).toEqual([]);
+    const [method] = p.agentStatus('alpha')!.authMethods;
+    expect(method).toMatchObject({ id: 'cli', type: 'terminal', args: ['--login'], env: { FAKE_LOGIN_MODE: '1' } });
+    await expect(p.ensureAgent('alpha').then((c) => c.authenticate('cli'))).rejects.toThrow(/terminal/);
+
+    // What the host runs in a terminal: the launch command + launch args + the method's args.
+    const launch = agent('alpha', env);
+    execFileSync(launch.command, [...launch.args, ...(method as { args: string[] }).args], { env: { ...process.env, ...env } });
+    await p.restartAgent('alpha');
+    expect((await p.getModels()).map((m) => m.id)).toEqual(['alpha']);
+  }, 20_000);
+
+  it('declares auth.terminal, configOptions.boolean, notices and plan to the agent', async () => {
+    const p = await started([agent('alpha')]);
+    await p.createConversation(conv('c1'));
+    expect(await echo(p, 'c1', 'ECHO_CLIENT_CAPS')).toMatchObject({
+      auth: { terminal: true },
+      session: { compaction: {}, configOptions: { boolean: {} }, notices: {} },
+      plan: {},
+    });
+  }, 20_000);
+});
+
+describe('AcpProvider — persistence', () => {
+  it('resumes the agent session in a NEW process from the provider session id; forks when advertised', async () => {
+    const sessions = path.join(dir, 'sessions.json');
+    const env = { FAKE_ACP_RESUME: '1', FAKE_ACP_SESSIONS_FILE: sessions, FAKE_ACP_MODELS: '1' };
+    const first = await started([agent('alpha', env)]);
+    await first.createConversation(conv('c1', { model: 'alpha/smart' }));
+    const providerSessionId = first.getProviderSessionId('c1')!;
+    expect(providerSessionId).toMatch(/^alpha\//);
+    expect(first.capabilitiesFor('c1')).toMatchObject({ sessionPersistence: true, conversationFork: true });
+
+    const forked = await first.forkConversation('c1', { newConversationId: 'c1-fork', params: conv('c1-fork') });
+    expect(forked.providerSessionId).toMatch(/^alpha\//);
+    expect((await echo(first, 'c1-fork', 'ECHO_SESSION'))['forkedFrom']).toBe(providerSessionId.slice('alpha/'.length));
+    await first.shutdown();
+
+    const second = await started([agent('alpha', env)]);
+    expect(await second.providerSessionExists(providerSessionId)).toBe(true);
+    await second.resumeConversation('c1', conv('c1', { model: 'alpha/smart', resumeProviderSessionId: providerSessionId, resumeProviderSessionHarness: 'acp' }));
+    expect(second.getProviderSessionId('c1')).toBe(providerSessionId);
+    expect((await echo(second, 'c1', 'ECHO_SESSION'))['resumed']).toBe(true);
+    expect(second.getConversationWarnings('c1').some((w) => w.code === 'CONVERSATION_RESTARTED')).toBe(false);
+
+    // An unknown session cannot be resumed: a new session, reported as restarted.
+    await second.createConversation(conv('c2', { resumeProviderSessionId: 'alpha/not-a-session' }));
+    expect(second.getConversationWarnings('c2')).toContainEqual(expect.objectContaining({ code: 'CONVERSATION_RESTARTED' }));
+    expect(second.hasLiveConversation('c2')).toBe(true);
+  }, 30_000);
+
+  it('a restarted agent resumes the sessions its conversations had', async () => {
+    const env = { FAKE_ACP_RESUME: '1', FAKE_ACP_SESSIONS_FILE: path.join(dir, 's.json') };
+    const p = await started([agent('alpha', env)]);
+    await p.createConversation(conv('c1'));
+    const before = p.getProviderSessionId('c1');
+    await p.restartAgent('alpha');
+    expect(p.hasLiveConversation('c1')).toBe(false);
+    await p.resumeConversation('c1', conv('c1'));
+    expect(p.getProviderSessionId('c1')).toBe(before);
+    expect((await echo(p, 'c1', 'ECHO_SESSION'))['resumed']).toBe(true);
+  }, 20_000);
 });

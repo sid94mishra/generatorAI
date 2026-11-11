@@ -33,7 +33,7 @@ import { createHarnessProvider } from './HarnessFactory.js';
 import type { HarnessType, HarnessProviderConfig } from './types.js';
 import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { FAUX_MODELS } from './providers/faux/FauxProvider.js';
-import { harnessProviderLabel } from '@generatorai/shared';
+import { harnessProviderLabel, type HarnessSubProviderStatus } from '@generatorai/shared';
 
 /**
  * Optional credential probe. Providers that can distinguish "installed" from
@@ -62,6 +62,17 @@ function isAccountAware(a: unknown): a is AccountAware {
  */
 interface ModelProbeErrorAware {
   getLastModelProbeError(): string | undefined;
+}
+
+/** A provider that multiplexes agents (ACP-3): its per-agent statuses ride on its own. */
+interface SubProviderAware {
+  getSubProviders(): HarnessSubProviderStatus[];
+}
+
+function subProvidersOf(a: unknown): { subProviders: HarnessSubProviderStatus[] } | Record<string, never> {
+  return typeof (a as SubProviderAware)?.getSubProviders === 'function'
+    ? { subProviders: (a as SubProviderAware).getSubProviders() }
+    : {};
 }
 
 function isModelProbeErrorAware(a: unknown): a is ModelProbeErrorAware {
@@ -202,6 +213,8 @@ export interface HarnessProviderStatus {
   error?: string;
   /** When the catalog was last refreshed (epoch ms). */
   checkedAt?: number;
+  /** ACP-3 — the agents a multiplexing provider (`acp`) drives, one per enabled agent. */
+  subProviders?: HarnessSubProviderStatus[];
   /**
    * W41 — this verdict was restored from the disk cache and has NOT been
    * re-verified by a live probe in this process. The catalog is still usable
@@ -1094,6 +1107,7 @@ export class HarnessRegistry {
               checkedAt: Date.now(),
               // A live probe supersedes whatever the disk cache claimed.
               fromDiskCache: false,
+              ...subProvidersOf(adapter),
             };
             if (credentialError) entry.status.error = credentialError;
             else delete entry.status.error;

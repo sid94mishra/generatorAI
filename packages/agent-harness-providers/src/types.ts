@@ -2,7 +2,7 @@
 // Agent Harness Provider types
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger, HarnessProviderId } from '@generatorai/shared';
+import type { ILogger, HarnessProviderId, ProviderMark } from '@generatorai/shared';
 import type { AgentHostSupervisor } from './AgentHostSupervisor.js';
 
 /**
@@ -317,55 +317,80 @@ export interface OpenCodeProviderOptions {
   logger?: ILogger;
 }
 
-// ── W39 — ACP breadth client options ─────────────────────────────────────────
+// ── W39 — ACP agents (docs/acp) ──────────────────────────────────────────────
 //
-// Real ACP (the Zed Agent Client Protocol, `@agentclientprotocol/sdk`) is
-// JSON-RPC 2.0 over the stdio of a spawned agent process — there is no HTTP
-// or WebSocket transport in the spec. An agent that speaks ACP is invoked
-// exactly like Codex or Claude Code's own CLI: a binary on PATH (or a path to
-// one), not a URL.
+// Real ACP (the Agent Client Protocol, `@agentclientprotocol/sdk`) is JSON-RPC
+// 2.0 over the stdio of a spawned agent process. `AcpProvider` (the `acp`
+// provider) multiplexes: one `AcpAgentConnection` (one agent process) per
+// enabled agent, a conversation bound to the agent its model names
+// (`<agentId>/<value>`, ACP-1/ACP-2).
 
-export interface AcpProviderOptions {
-  /**
-   * The ACP agent binary to spawn (e.g. `gemini`, `goose`, or a path to a
-   * custom agent script). Resolved against PATH like any other spawned
-   * command. Required — there is no default agent for a generic ACP client.
-   */
+/** One enabled agent: how to launch it and how to present it. Built by the server from its install. */
+export interface AcpAgentLaunch {
+  /** Registry id (`gemini`, `goose`, …) or a custom agent's `custom-…` id. No `/`. */
+  id: string;
+  /** Display name (the registry `name`). */
+  label: string;
+  /** Executable: an absolute path inside the agent's install directory, `node`, or a custom command. */
   command: string;
-  /** Extra CLI arguments passed to the spawned binary. */
+  args: string[];
+  /** Distribution env + the user's per-agent variables. */
+  env?: Record<string, string>;
+  /** Directory the agent process starts in (its install directory). */
+  cwd?: string;
+  /** Installed version, for the status. */
+  version?: string;
+  /** Sanitised mark (shared `ProviderMark`), passed through to the sub-provider status. */
+  mark?: ProviderMark;
+  /** Tier-B host gate (L16). Default true. */
+  tierB?: boolean;
+}
+
+/** Options of one agent connection (`AcpAgentConnection`). */
+export interface AcpAgentConnectionOptions {
+  /** The ACP agent binary to spawn (resolved against PATH like any spawned command). */
+  command: string;
+  /** Arguments passed to the spawned binary. */
   args?: string[];
   /**
-   * Working directory for the spawned process AND the `cwd` sent in every
-   * ACP `session/new` request — all paths in the protocol are resolved
-   * relative to it. Default: `process.cwd()`.
+   * Fallback directory for sessions whose conversation names none (`session/new.cwd`), and the spawn
+   * directory when `cwd` is not given. Default: `process.cwd()`.
    */
   defaultCwd?: string;
-  /** Injected environment variables for the spawned process. */
+  /** Directory the agent process starts in. Default `defaultCwd`. */
+  cwd?: string;
+  /** Environment for the spawned process, on top of the harness allowlist (`childEnv.ts`). */
   env?: Record<string, string | undefined>;
+  /** The agent id inside a multiplexing provider. */
+  agentId?: string;
+  /** Display name (for the "agent's default model" entry and messages). */
+  label?: string;
   /**
-   * Whether this agent runs at Tier-B (untrusted / constrained).
-   * When true the host gate denies `computer-use` and unrestricted shell
-   * capabilities regardless of what the agent's own permission model says.
-   * Default: true (fail-closed).
+   * Whether this agent runs at Tier-B (untrusted / constrained): the host gate denies every tool kind but
+   * read/search/think regardless of the agent's own permission model. Default: true (fail-closed).
    */
   tierB?: boolean;
-  /**
-   * Deadline for `initialize`, `session/new` and `session/close`, in ms.
-   * Default 30_000; 0 disables.
-   *
-   * Nothing in the ACP SDK bounds a request whose agent never replies, and
-   * `initialize()` sits on the harness bring-up path.
-   */
+  /** Deadline for `initialize`, `session/*` setup requests and `session/close`, in ms. Default 30_000; 0 disables. */
   requestTimeoutMs?: number;
-  /**
-   * Deadline for a domain `onPermissionRequest` decision, in ms.
-   * Default 300_000 (5 min); 0 disables.
-   *
-   * Deliberately long — a human may be on the other end — but it must exist:
-   * the agent's `session/request_permission` request stays open for the whole
-   * wait, so an approver who never answers otherwise pins the agent's turn.
-   * On expiry the gate DENIES.
-   */
+  /** Deadline for a domain `onPermissionRequest` decision, in ms. Default 300_000; 0 disables. On expiry the gate DENIES. */
   permissionTimeoutMs?: number;
+  /** Deadline for `authenticate` (a browser sign-in may take a while), in ms. Default 600_000. */
+  authTimeoutMs?: number;
+  /** Sign-in state, catalog or process state changed (the provider re-reports its status). */
+  onStateChange?: () => void;
+  logger?: ILogger;
+}
+
+/** Options of the `acp` provider. */
+export interface AcpProviderOptions {
+  /** The enabled agents at construction; `AcpProvider.setAgents` replaces them live. */
+  agents?: AcpAgentLaunch[];
+  /** Session directory fallback (see `AcpAgentConnectionOptions.defaultCwd`). */
+  defaultCwd?: string;
+  requestTimeoutMs?: number;
+  permissionTimeoutMs?: number;
+  authTimeoutMs?: number;
+  /** An agent's state changed (signed in, models listed, process died): re-probe the provider. */
+  onChange?: () => void;
   logger?: ILogger;
 }

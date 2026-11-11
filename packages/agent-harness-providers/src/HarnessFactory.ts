@@ -155,15 +155,11 @@ export async function createHarnessProvider(
       return new mod.OpenCodeProvider(config.opencode ?? {});
     }
 
-    // W39 — ACP breadth client (long-tail agents, real JSON-RPC-over-stdio ACP)
+    // W39 — ACP agents (docs/acp): one provider multiplexing every enabled agent. With no agent enabled it is
+    // still constructed and reports "No ACP agents enabled" (ACP-9).
     case 'acp': {
-      if (!config.acp?.command) {
-        throw new Error(
-          `Harness type "acp" requires acp.command — the ACP agent binary to spawn.`,
-        );
-      }
       const mod = await loadAcpModule(); /* W41 */
-      return new mod.AcpProvider(config.acp);
+      return new mod.AcpProvider(config.acp ?? {});
     }
 
     // P2-00 — 'faux' never reaches here. `HarnessRegistry` reports it as a

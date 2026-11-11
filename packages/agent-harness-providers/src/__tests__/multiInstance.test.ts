@@ -36,7 +36,7 @@ function makeRegistry(): HarnessRegistry {
   return new HarnessRegistry({
     // Never actually invoked in this test — every conversation is routed
     // through a registered INSTANCE, not the default type-level path.
-    buildConfig: () => ({ type: 'acp', acp: { command: 'unused' } }),
+    buildConfig: () => ({ type: 'acp', acp: {} }),
     primary: 'acp',
   });
 }
@@ -53,11 +53,11 @@ describe('W34 — multi-instance routing (real processes, no mocks)', () => {
     registries.push(registry);
     registry.registerInstance(makeProviderInstanceId('acp:work'), 'acp', {
       type: 'acp',
-      acp: { command: process.execPath, args: [FIXTURE_AGENT] },
+      acp: { agents: [{ id: 'fake', label: 'Fake agent', command: process.execPath, args: [FIXTURE_AGENT] }] },
     });
     registry.registerInstance(makeProviderInstanceId('acp:personal'), 'acp', {
       type: 'acp',
-      acp: { command: process.execPath, args: [FIXTURE_AGENT] },
+      acp: { agents: [{ id: 'fake', label: 'Fake agent', command: process.execPath, args: [FIXTURE_AGENT] }] },
     });
 
     const [work, personal] = await Promise.all([
@@ -86,11 +86,11 @@ describe('W34 — multi-instance routing (real processes, no mocks)', () => {
     const personalId = makeProviderInstanceId('acp:personal');
     registry.registerInstance(workId, 'acp', {
       type: 'acp',
-      acp: { command: process.execPath, args: [FIXTURE_AGENT] },
+      acp: { agents: [{ id: 'fake', label: 'Fake agent', command: process.execPath, args: [FIXTURE_AGENT] }] },
     });
     registry.registerInstance(personalId, 'acp', {
       type: 'acp',
-      acp: { command: process.execPath, args: [FIXTURE_AGENT] },
+      acp: { agents: [{ id: 'fake', label: 'Fake agent', command: process.execPath, args: [FIXTURE_AGENT] }] },
     });
 
     const instanceRegistry = new ProviderInstanceRegistry();

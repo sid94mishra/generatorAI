@@ -84,7 +84,7 @@ function makeHarnessRegistry(): HarnessRegistry {
   return new HarnessRegistry({
     buildConfig: () => ({
       type: 'acp',
-      acp: { command: process.execPath, args: [FIXTURE_AGENT] },
+      acp: { agents: [{ id: 'fake', label: 'Fake agent', command: process.execPath, args: [FIXTURE_AGENT] }] },
     }),
     primary: 'acp',
   });
@@ -380,7 +380,7 @@ describe('W34 — deleting an instance and replaying a thread (the acceptance cr
     for (const id of [WORK, PERSONAL]) {
       harnessRegistry.registerInstance(id, 'acp', {
         type: 'acp',
-        acp: { command: process.execPath, args: [FIXTURE_AGENT] },
+        acp: { agents: [{ id: 'fake', label: 'Fake agent', command: process.execPath, args: [FIXTURE_AGENT] }] },
       });
     }
     const instanceRegistry = new ProviderInstanceRegistry();

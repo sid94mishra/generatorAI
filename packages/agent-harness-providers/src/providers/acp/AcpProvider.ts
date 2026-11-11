@@ -1,51 +1,22 @@
 // ────────────────────────────────────────────────────────────────
-// AcpProvider — IAgentHarness wrapping ACP-compliant agents.
+// AcpProvider — the `acp` provider: every enabled ACP agent behind one
+// IAgentHarness (docs/acp ACP-1…ACP-3).
 //
-// W39 (was W11) — ACP breadth client. Speaks the REAL Agent Client Protocol
-// (ACP) — JSON-RPC 2.0 over the stdio of a spawned agent process, via
-// `@agentclientprotocol/sdk` — to any compliant agent (Gemini CLI, Goose,
-// etc.).
+// One `AcpAgentConnection` (one agent process) per enabled agent. A model id
+// names its agent — `<agentId>/<value>`, or `<agentId>` alone for an agent
+// that publishes no model option (ACP-2) — and a conversation stays bound to
+// the agent that created it; a rebind with another agent's model moves it
+// (a new session there, reported as CONVERSATION_RESTARTED so the transcript
+// is handed over). Provider session ids are `<agentId>/<sessionId>` so a
+// resume after a restart reaches the agent that issued it.
 //
-// Corrected 2026-08-26: the previous version of this file invented its own
-// HTTP+SSE REST API (`POST /runs`, `POST /runs/:id/messages`, an SSE body
-// with `data: {...}` chunks) and called it "ACP". There is no HTTP or
-// WebSocket transport in the real spec — every ACP agent is a subprocess an
-// editor spawns and talks to over stdin/stdout, exactly like Codex's
-// `app-server` (see `CodexProvider.ts`). That fabricated API, its
-// hand-written schema (`protocol/acp.generated.ts`, `schemas/acp/acp-schema.json`),
-// and this file are replaced with the real thing.
-//
-// Scope: long-tail agents only — not Claude, Copilot, Codex or OpenCode
-// (those have dedicated, higher-fidelity providers).
-//
-// Architecture laws honoured:
-//   L9:  capabilities() declared, fail-closed defaults.
-//   L16: Tier-B sessions are host-gated — computer use and unrestricted
-//        shell are denied regardless of what the agent's own permission
-//        model says. This is IN-PROCESS defense-in-depth (the ACP
-//        `session/request_permission` request is intercepted and denied
-//        before the agent's own answer is ever consulted); it is not a
-//        substitute for the PTY/Browser/CUA host-boundary enforcement the
-//        plan also calls for, which depends on those hosts being the live
-//        path (tracked separately — see the "native host wiring" item).
-//   W13: Semantic cancellation — `session/cancel` surfaces as
-//        `harness.cancelled`, not a throw or a generic error.
-//
-// Protocol: real ACP, version `acp.PROTOCOL_VERSION` (an integer bumped only
-// on breaking changes; see `@agentclientprotocol/sdk`). Transport: JSON-RPC
-// 2.0 newline-delimited over the spawned agent's stdio.
+// The agent set is live: `setAgents` (the server's ACP service calls it when
+// an agent is enabled, disabled, updated or its env changes) starts, restarts
+// and stops connections without a server restart; `onChange` tells the host
+// to re-probe. With no agent enabled the catalog is empty and the status says
+// "No ACP agents enabled" (ACP-9).
 // ────────────────────────────────────────────────────────────────
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { Readable, Writable } from 'node:stream';
-// ── W41 — the ACP SDK is resolved on FIRST USE, not at module load ──
-//
-// This was `import * as acp from '@agentclientprotocol/sdk'` — a namespace
-// VALUE import, so every consumer that touched this module (the package barrel
-// did, eagerly, and `HarnessFactory` still does) pulled the whole ACP SDK into
-// the process at boot. `import type * as` keeps every type reference below
-// working and is erased entirely by the compiler.
-import type * as acp from '@agentclientprotocol/sdk/unstable';
 import type {
   IAgentHarness,
   CreateConversationParams,
@@ -60,997 +31,546 @@ import type {
   HarnessAgentInfo,
   ProviderCapabilities,
   CompactConversationOptions,
+  ForkConversationOptions,
+  ForkConversationResult,
+  HarnessRuntimeDiagnostics,
 } from '@generatorai/core';
-import { COMPACTION_INFO, describeCompaction } from '@generatorai/shared';
-import type { AgentEvent, CompactionTrigger } from '@generatorai/shared';
-import { buildHarnessEnv } from '../../childEnv.js';
-import { rootsOf, sameRoots } from '../../conversationRoots.js';
-import type { AcpProviderOptions } from '../../types.js';
-
-// ── W41 — lazy SDK module singleton ──────────────────────────────
-
-// `import type * as` — erased at compile time, so the SDK is still only
-// loaded by the dynamic `import()` below (W41). The inline `typeof import()`
-// form this replaces is what `consistent-type-imports` forbids.
-import type * as AcpSdkNs from '@agentclientprotocol/sdk/unstable';
-type AcpSdk = typeof AcpSdkNs;
-
-let acpSdk: AcpSdk | null = null;
-let acpSdkLoading: Promise<AcpSdk> | null = null;
-
-/** Resolve `@agentclientprotocol/sdk` on first use. */
-async function loadAcpSdk(): Promise<AcpSdk> {
-  if (acpSdk) return acpSdk;
-  acpSdkLoading ??= import('@agentclientprotocol/sdk/unstable')
-    .then((mod) => {
-      acpSdk = mod;
-      return mod;
-    })
-    .catch((err: unknown) => {
-      acpSdkLoading = null;
-      throw err;
-    });
-  return acpSdkLoading;
-}
-
-/**
- * The already-loaded SDK, for the synchronous paths.
- *
- * Every caller of this runs only after `initialize()` has completed a
- * handshake, which cannot happen without the SDK — so reaching here with a
- * null module is a programming error, and says so rather than reading
- * `undefined.methods` three frames later.
- */
-function acpRuntime(): AcpSdk {
-  if (!acpSdk) {
-    throw new Error('AcpProvider: ACP SDK used before initialize() loaded it');
-  }
-  return acpSdk;
-}
-
-/** W41 — test seam: has the SDK been pulled into this process yet? */
-export function isAcpSdkLoaded(): boolean {
-  return acpSdk !== null;
-}
-
-// ── Type aliases ─────────────────────────────────────────────────
+import type { AgentEvent, HarnessSubProviderStatus } from '@generatorai/shared';
+import type { AcpAgentLaunch, AcpProviderOptions } from '../../types.js';
+import { AcpAgentConnection, type AcpConnectionStatus } from './AcpAgentConnection.js';
 
 type Listener<T> = (event: T) => void;
-type UnsubFn = () => void;
 
-interface ConversationState {
-  session: acp.ActiveSession | null;
-  params: CreateConversationParams;
-  listeners: Set<Listener<AgentEvent>>;
-  warnings: ConversationWarning[];
-  inFlight: boolean;
-  /**
-   * The prompt turn reading the session's updates, while one runs. The session has ONE update queue
-   * (`nextUpdate`), read by one pump for the life of the session (`startPump`): during a turn it hands each
-   * message here, between turns it applies the update itself — agents announce their commands right after
-   * `session/new`, and compact or report usage between prompts.
-   */
-  turnSink: TurnSink | null;
-  /** Command names from the agent's latest `available_commands_update` (`compact` → native compaction). */
-  commands: Set<string>;
-  /** A `/compact` of ours in flight: whether its start / end were already reported. */
-  compacting: { startReported: boolean; endReported: boolean; summary: string } | null;
-  /** Summaries of compactions in progress, by compaction id (`compaction_summary_chunk`). */
-  compactionSummaries: Map<string, string>;
+/** `<agentId>/<value>` → its parts. An id with no `/` is the agent's default model. */
+export function splitAcpModelId(modelId: string): { agentId: string; value: string } {
+  const slash = modelId.indexOf('/');
+  return slash < 0 ? { agentId: modelId, value: '' } : { agentId: modelId.slice(0, slash), value: modelId.slice(slash + 1) };
 }
 
-/** A turn's view of the session pump: messages in order, or the error that ended the prompt. */
-interface TurnSink {
-  push(message: acp.ActiveSessionMessage): void;
-  fail(err: unknown): void;
-  next(): Promise<acp.ActiveSessionMessage>;
-  /** Settles when the turn is over; the pump waits on it after handing over an error. */
-  done: Promise<void>;
+/** The catalog id of an agent's model value (`''` = its default model). */
+export function acpModelId(agentId: string, value: string): string {
+  return value ? `${agentId}/${value}` : agentId;
 }
 
-function createTurnSink(): TurnSink & { finish(): void } {
-  const values: Array<{ ok: true; value: acp.ActiveSessionMessage } | { ok: false; error: unknown }> = [];
-  const waiters: Array<{ resolve: (m: acp.ActiveSessionMessage) => void; reject: (e: unknown) => void }> = [];
-  let finish!: () => void;
-  const done = new Promise<void>((r) => { finish = r; });
-  const deliver = (entry: (typeof values)[number]) => {
-    const waiter = waiters.shift();
-    if (!waiter) { values.push(entry); return; }
-    if (entry.ok) waiter.resolve(entry.value);
-    else waiter.reject(entry.error);
-  };
-  return {
-    push: (value) => deliver({ ok: true, value }),
-    fail: (error) => deliver({ ok: false, error }),
-    next: () => {
-      const entry = values.shift();
-      if (entry) return entry.ok ? Promise.resolve(entry.value) : Promise.reject(entry.error);
-      return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
-    },
-    done,
-    finish: () => finish(),
-  };
+/** What makes a running connection stale: anything about how the process is launched. */
+function launchSignature(l: AcpAgentLaunch): string {
+  return JSON.stringify([l.command, l.args, l.env ?? {}, l.cwd ?? '', l.tierB ?? true]);
 }
 
-/**
- * L16 — tool kinds a Tier-B agent is PERMITTED to request, as a frozen
- * opt-in set. Everything else is denied.
- *
- * This replaces a substring denylist (`'computer-use'`, `'screen'`, `'mouse'`…)
- * matched against `title`/`name`. That gate failed OPEN in two independent
- * ways, and both are reachable by an untrusted agent by construction:
- *
- *  1. `title` and `name` are MODEL-CONTROLLED free text. An agent that wants
- *     its shell call approved simply does not put "screen" in the title.
- *  2. Everything the denylist did not name fell through to the default-approve
- *     branch at the bottom of `handleRequestPermission` — so `edit`, `delete`,
- *     `move` and `fetch` were all auto-approved for a Tier-B agent that the
- *     class header describes as untrusted. A file delete was one un-listed
- *     keyword away from running unattended.
- *
- * The plan's rule is opt-in frozensets, never negations, denied by default.
- * Only kinds that cannot mutate the workspace or reach the network are listed;
- * an absent, null or unrecognised kind is denied precisely because it is
- * unrecognised. `ToolKind` is an open union in ACP v2 (`| string`), so an
- * allowlist is also the only shape that stays correct as the vocabulary grows.
- */
-const TIER_B_ALLOWED_KINDS: ReadonlySet<string> = new Set<acp.ToolKind>([
-  'read',   // read a file the agent was already given a cwd for
-  'search', // grep/glob within that cwd
-  'think',  // no side effects at all
-]);
-
-/** True when a Tier-B agent may NOT make this call. Denied unless allowed. */
-function isTierBBlocked(toolCall: { kind?: acp.ToolKind | null }): boolean {
-  return !toolCall.kind || !TIER_B_ALLOWED_KINDS.has(toolCall.kind);
+interface AgentEntry {
+  launch: AcpAgentLaunch;
+  conn: AcpAgentConnection | null;
+  starting: Promise<AcpAgentConnection> | null;
+  /** Why the last start failed. */
+  startError?: string;
 }
 
-/** First permission option matching one of `kinds`, in priority order. */
-function findOption(
-  options: acp.PermissionOption[],
-  kinds: readonly acp.PermissionOptionKind[],
-): acp.PermissionOption | undefined {
-  for (const kind of kinds) {
-    const found = options.find((o) => o.kind === kind);
-    if (found) return found;
-  }
-  return undefined;
+interface ConversationBinding {
+  agentId: string;
+  /** The agent's session id, kept so a re-created connection can resume it. */
+  sessionId?: string;
+  unsubscribe?: () => void;
 }
 
-/** Extract plain text from an ACP content block, or '' for non-text blocks. */
-function textOf(content: acp.ContentBlock): string {
-  return content.type === 'text' ? content.text : '';
-}
-
-/**
- * Deadline for `initialize`, `session/new` and `session/close`.
- *
- * A spawned agent that reads our request and simply never answers is
- * indistinguishable from a slow one at the protocol level, and `initialize()`
- * sits on the harness bring-up path — an unbounded wait there stalls boot.
- */
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-
-/**
- * Deadline for a domain permission decision. Deliberately long: a human may be
- * on the other end. It exists so an approver who never answers eventually
- * denies rather than pinning the agent's open JSON-RPC request forever.
- */
-const DEFAULT_PERMISSION_TIMEOUT_MS = 5 * 60_000;
-
-// ── AcpProvider ──────────────────────────────────────────────────
-
-/**
- * W39 — IAgentHarness backed by any real ACP-compliant agent process.
- *
- * Lifecycle:
- *   1. `initialize()` spawns the agent binary, wraps its stdio in an ACP
- *      `Stream`, and sends `initialize` to negotiate the protocol version.
- *   2. `createConversation()` calls `session/new` (via the SDK's
- *      `buildSession(cwd).start()`), returning a long-lived `ActiveSession`.
- *   3. `sendPromptAndWait()` calls `session.prompt(...)` and drains
- *      `session.nextUpdate()` until the turn stops, translating each
- *      `session/update` notification into an `AgentEvent`.
- *   4. `abortConversation()` sends the `session/cancel` notification.
- *   5. `shutdown()` closes the ACP connection and kills the agent process.
- */
 export class AcpProvider implements IAgentHarness {
   private readonly opts: AcpProviderOptions;
-  private proc: ChildProcess | null = null;
-  private connection: acp.ClientConnection | null = null;
+  private readonly agents = new Map<string, AgentEntry>();
+  private order: string[] = [];
+  private readonly bindings = new Map<string, ConversationBinding>();
+  private readonly listeners = new Map<string, Set<Listener<AgentEvent>>>();
+  private readonly clientEventListeners = new Set<Listener<HarnessClientEvent>>();
   private clientState: HarnessClientState = 'starting';
-  private clientEventListeners = new Set<Listener<HarnessClientEvent>>();
-  private conversations = new Map<string, ConversationState>();
-  /** Protocol version the agent actually confirmed in its InitializeResponse. */
-  // W41 — set from the loaded SDK in `initialize()`; the SDK is no longer
-  // available at field-initialiser time (it is imported dynamically).
-  private negotiatedVersion: acp.ProtocolVersion | undefined;
-  /** True once we have asked the agent to exit, so its exit is not an error. */
-  private stopping = false;
+  private lastProbeError: string | undefined;
 
-  constructor(opts: AcpProviderOptions) {
+  constructor(opts: AcpProviderOptions = {}) {
     this.opts = opts;
+    for (const launch of opts.agents ?? []) this.agents.set(launch.id, { launch, conn: null, starting: null });
+    this.order = (opts.agents ?? []).map((a) => a.id);
+  }
+
+  // ── The agent set ────────────────────────────────────────────────
+
+  /** The enabled agents, in display order. */
+  agentIds(): string[] {
+    return [...this.order];
+  }
+
+  /**
+   * Replace the enabled agents. New ones start (when the provider runs), removed ones stop, and one whose launch
+   * changed (an update, new env) restarts; its conversations resume their sessions on the next turn.
+   */
+  async setAgents(launches: AcpAgentLaunch[]): Promise<void> {
+    const next = new Map(launches.map((l) => [l.id, l]));
+    const stops: Array<Promise<void>> = [];
+    for (const [id, entry] of this.agents) {
+      if (next.has(id)) continue;
+      this.agents.delete(id);
+      stops.push(this.stopEntry(entry));
+    }
+    for (const launch of launches) {
+      const entry = this.agents.get(launch.id);
+      if (!entry) {
+        this.agents.set(launch.id, { launch, conn: null, starting: null });
+        if (this.clientState === 'running') void this.ensureAgent(launch.id).catch(() => undefined);
+        continue;
+      }
+      const changed = launchSignature(entry.launch) !== launchSignature(launch);
+      entry.launch = launch;
+      if (changed) {
+        stops.push(this.stopEntry(entry));
+        delete entry.startError;
+        if (this.clientState === 'running') void this.ensureAgent(launch.id).catch(() => undefined);
+      }
+    }
+    this.order = launches.map((l) => l.id);
+    await Promise.all(stops);
+    this.notifyChange();
+  }
+
+  /** Stop an agent's process and start it again (after a terminal sign-in exited 0). */
+  async restartAgent(agentId: string): Promise<AcpAgentConnection> {
+    const entry = this.agents.get(agentId);
+    if (!entry) throw new Error(`ACP agent "${agentId}" is not enabled.`);
+    await this.stopEntry(entry);
+    delete entry.startError;
+    const conn = await this.ensureAgent(agentId);
+    this.notifyChange();
+    return conn;
+  }
+
+  private async stopEntry(entry: AgentEntry): Promise<void> {
+    const conn = entry.conn ?? (await entry.starting?.catch(() => null)) ?? null;
+    entry.conn = null;
+    entry.starting = null;
+    if (conn) await conn.shutdown().catch(() => undefined);
+  }
+
+  /** The agent's running connection, started (or restarted after its process died) on demand. */
+  async ensureAgent(agentId: string): Promise<AcpAgentConnection> {
+    const entry = this.agents.get(agentId);
+    if (!entry) throw new Error(`ACP agent "${agentId}" is not enabled. Enable it in Settings › Model providers › ACP agents.`);
+    if (entry.conn && entry.conn.getClientState() === 'running') return entry.conn;
+    if (entry.starting) return entry.starting;
+    const launch = entry.launch;
+    const conn = new AcpAgentConnection({
+      command: launch.command,
+      args: launch.args,
+      env: launch.env,
+      cwd: launch.cwd,
+      defaultCwd: this.opts.defaultCwd,
+      agentId: launch.id,
+      label: launch.label,
+      tierB: launch.tierB ?? true,
+      requestTimeoutMs: this.opts.requestTimeoutMs,
+      permissionTimeoutMs: this.opts.permissionTimeoutMs,
+      authTimeoutMs: this.opts.authTimeoutMs,
+      onStateChange: () => this.notifyChange(),
+      logger: this.opts.logger,
+    });
+    entry.conn = null;
+    const starting = (async () => {
+      await conn.initialize();
+      return conn;
+    })();
+    entry.starting = starting;
+    try {
+      await starting;
+      if (entry.starting !== starting) {
+        // Replaced (setAgents / restart) while it was starting.
+        await conn.shutdown().catch(() => undefined);
+        throw new Error(`ACP agent "${agentId}" was restarted while it started.`);
+      }
+      entry.conn = conn;
+      delete entry.startError;
+      return conn;
+    } catch (err) {
+      if (entry.starting === starting) entry.startError = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      if (entry.starting === starting) entry.starting = null;
+    }
+  }
+
+  /** The running connection of an agent, if any (never starts one). */
+  peekAgent(agentId: string): AcpAgentConnection | null {
+    return this.agents.get(agentId)?.conn ?? null;
+  }
+
+  /** Per-agent state for the ACP API: connection status, or why it is not running. */
+  agentStatus(agentId: string): (AcpConnectionStatus & { startError?: string }) | null {
+    const entry = this.agents.get(agentId);
+    if (!entry) return null;
+    const base: AcpConnectionStatus = entry.conn?.status() ?? {
+      connected: false,
+      authState: 'unknown',
+      models: [],
+      authMethods: [],
+      supportsLogout: false,
+    };
+    return { ...base, ...(entry.startError ? { startError: entry.startError, error: entry.startError } : {}) };
+  }
+
+  private notifyChange(): void {
+    try { this.opts.onChange?.(); } catch { /* a listener never breaks the provider */ }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
 
   async initialize(): Promise<void> {
-    const bin = this.opts.command;
-    this.stopping = false;
-
-    // Same ENOENT-safe spawn pattern as CodexProvider: the 'error' event
-    // fires on next tick, ahead of setImmediate, so a missing binary rejects
-    // initialize() instead of leaving the provider silently half-started.
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn(bin, this.opts.args ?? [], {
-        cwd: this.opts.defaultCwd ?? process.cwd(),
-        // The agent executes model-authored tool calls, so it gets the
-        // allowlisted harness environment, never the full parent env — same
-        // rule `childEnv.ts` enforces for every other spawned provider.
-        env: buildHarnessEnv({ extra: this.opts.env }),
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
-      this.proc = proc;
-
-      proc.once('error', (err) => {
-        const msg = (err as NodeJS.ErrnoException).code === 'ENOENT'
-          ? `ACP agent binary "${bin}" not found. Install it and ensure it is on PATH, or set AcpProviderOptions.command to an absolute path.`
-          : err.message;
-        this.clientState = 'error';
-        for (const h of this.clientEventListeners) h({ type: 'client.error', data: { message: msg } });
-        reject(new Error(msg));
-      });
-
-      proc.on('exit', (code, sig) => {
-        // `kill('SIGTERM')` yields `code === null`, so keying purely off
-        // `code === 0` reported every ORDERLY shutdown as a provider failure:
-        // `shutdown()` set 'stopped', this handler immediately flipped it back
-        // to 'error', and every listener got a spurious `client.error`.
-        const clean = this.stopping || code === 0;
-        this.clientState = clean ? 'stopped' : 'error';
-        for (const h of this.clientEventListeners) {
-          h({
-            type: clean ? 'client.stopped' : 'client.error',
-            data: clean
-              ? undefined
-              : { message: sig ? `ACP agent exited on signal ${sig}` : `ACP agent exited with code ${code}` },
-          });
-        }
-      });
-
-      setImmediate(resolve);
-    });
-
-    const proc = this.proc!;
-    // W41 — first use of the ACP SDK in this process.
-    const sdk = await loadAcpSdk();
-    this.negotiatedVersion = sdk.PROTOCOL_VERSION;
-    const stream = sdk.ndJsonStream(
-      Writable.toWeb(proc.stdin!) as WritableStream<Uint8Array>,
-      Readable.toWeb(proc.stdout!) as ReadableStream<Uint8Array>,
-    );
-
-    const clientApp = sdk
-      .client({ name: 'GeneratorAI' })
-      // L16 host gate + (when the caller supplies one) the domain
-      // `onPermissionRequest` callback — see `handleRequestPermission`.
-      .onRequest(sdk.methods.client.session.requestPermission, (ctx) =>
-        this.handleRequestPermission(ctx.params),
-      );
-
-    this.connection = clientApp.connect(stream);
-
-    try {
-      // Bounded: an agent that reads the handshake and never answers used to
-      // hang harness bring-up forever, with no error and no log.
-      const initResult = await this.withDeadline(
-        this.connection.agent.request(sdk.methods.agent.initialize, {
-        protocolVersion: sdk.PROTOCOL_VERSION,
-        // L9: declare only what we actually serve. We register no
-        // `fs/*`/`terminal/*` handlers, so both stay false — an agent that
-        // calls them anyway gets the SDK's own "Method not found" (-32601),
-        // which is the honest answer, not a stub that pretends to comply.
-        // `session.compaction`: we render `compaction_update` / `compaction_summary_chunk` (docs/compaction); without
-        // it an agent reports its compaction as a synthetic tool call, or not at all.
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, session: { compaction: {} } },
-        clientInfo: { name: 'GeneratorAI', version: '2.0.0' },
-        }),
-        this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
-        `ACP initialize handshake with "${bin}"`,
-      );
-      this.negotiatedVersion = initResult.protocolVersion;
-      if (this.negotiatedVersion !== sdk.PROTOCOL_VERSION) {
-        // Per spec: "The client should disconnect if it doesn't support this
-        // version." This SDK build only implements acp.PROTOCOL_VERSION.
-        throw new Error(
-          `AcpProvider: agent negotiated protocol version ${this.negotiatedVersion}, ` +
-          `but this build only supports ${sdk.PROTOCOL_VERSION}.`,
-        );
-      }
-    } catch (err) {
-      this.clientState = 'error';
-      // A failed handshake used to leave `connection` and `proc` non-null with
-      // their listeners still attached, so the caller held a provider that
-      // looked half-alive: `ping()` could still say true, `shutdown()` would
-      // "work" on a connection already closed, and a retried `initialize()`
-      // silently orphaned the first child. Tear the whole thing down.
-      this.stopping = true;
-      try { this.connection.close(err); } catch { /* already closing */ }
-      this.connection = null;
-      const proc = this.proc;
-      this.proc = null;
-      proc?.removeAllListeners('exit');
-      proc?.kill('SIGTERM');
-      throw new Error(`AcpProvider: failed to initialize ACP agent "${bin}": ${String(err)}`);
-    }
-
     this.clientState = 'running';
-  }
-
-  /**
-   * Reject `promise` if it has not settled within `ms`.
-   *
-   * ACP requests are held open by the peer, not by us: nothing in the SDK
-   * bounds a request whose agent simply never replies, so every request we
-   * make on a critical path carries its own deadline.
-   */
-  private async withDeadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-    if (ms <= 0) return promise;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`AcpProvider: ${what} timed out after ${ms} ms`)), ms);
-          timer.unref?.();
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
+    // Every enabled agent comes up now; one failing to start is its own status, never the provider's.
+    await Promise.allSettled(this.order.map((id) => this.ensureAgent(id)));
   }
 
   async stop(): Promise<void> { await this.shutdown(); }
+
   async forceStop(): Promise<void> {
-    this.stopping = true;
-    this.connection?.close();
-    this.connection = null;
-    this.proc?.kill('SIGKILL');
-    this.proc = null;
+    await Promise.all([...this.agents.values()].map(async (e) => {
+      const conn = e.conn;
+      e.conn = null;
+      e.starting = null;
+      await conn?.forceStop().catch(() => undefined);
+    }));
     this.clientState = 'stopped';
   }
+
   async shutdown(): Promise<void> {
-    this.stopping = true;
-    this.connection?.close();
-    this.connection = null;
-    this.proc?.kill('SIGTERM');
-    this.proc = null;
+    await Promise.all([...this.agents.values()].map((e) => this.stopEntry(e)));
+    for (const b of this.bindings.values()) b.unsubscribe?.();
     this.clientState = 'stopped';
   }
 
   getClientState(): HarnessClientState { return this.clientState; }
 
   async ping(): Promise<boolean> {
-    return this.clientState === 'running' && this.proc != null && !this.proc.killed;
+    return this.clientState === 'running';
   }
 
-  onClientEvent(handler: Listener<HarnessClientEvent>): UnsubFn {
+  onClientEvent(handler: Listener<HarnessClientEvent>): () => void {
     this.clientEventListeners.add(handler);
     return () => this.clientEventListeners.delete(handler);
   }
 
-  // ── Capabilities (L9, L16: Tier-B fail-closed) ────────────────────
+  // ── Capabilities ─────────────────────────────────────────────────
 
+  /** Before a conversation exists: the conservative baseline every ACP agent meets (L9). */
   capabilities(): ProviderCapabilities {
-    const tierB = this.opts.tierB ?? true; // fail-closed default
     return {
       vision: false,
       reasoning: false,
       reasoningEfforts: [],
       planMode: false,
-      mcpServers: false,
+      mcpServers: true,
       skills: 'none',
-      // `session/request_permission` reaches the session's gate per call
-      // (Tier-B additionally denies `execute`-kind calls at the boundary).
       approvalGating: 'per_call',
       hostTools: 'none',
       structuredOutput: 'none',
       sessionPersistence: false,
       budgetTracking: false,
-      // ACP has no dedicated GUI/computer-use surface, and Tier-B blocks
-      // `execute`-kind tool calls outright regardless — declared explicitly
-      // (required by runCapabilityDeclarationConformance's L9 check) rather
-      // than left undefined.
       computerUse: false,
-      // Per agent: only one that advertises a `compact` command can (see `capabilitiesFor`).
+      conversationFork: false,
       conversationCompact: false,
       compactInstructions: false,
     };
   }
 
-  /** `capabilities()`, plus what this conversation's agent advertised: `/compact` makes compaction native. */
   capabilitiesFor(conversationId: string): ProviderCapabilities {
-    const canCompact = this.conversations.get(conversationId)?.commands.has('compact') === true;
-    return { ...this.capabilities(), conversationCompact: canCompact, compactInstructions: canCompact };
+    const conn = this.connFor(conversationId);
+    return conn ? conn.capabilitiesFor(conversationId) : this.capabilities();
   }
 
-  // ── Model discovery ───────────────────────────────────────────────
+  // ── Catalog (ACP-2/3) ────────────────────────────────────────────
 
+  invalidateModelCache(): void {
+    for (const e of this.agents.values()) e.conn?.invalidateModelCache();
+  }
+
+  getLastModelProbeError(): string | undefined {
+    return this.lastProbeError;
+  }
+
+  /** Models of every enabled agent that is up and signed in, ids `<agentId>/<value>`, `subProvider` set. */
   async getModels(): Promise<HarnessModel[]> {
-    // ACP does not define a model catalog method. The model is configured
-    // on the agent's side (or via `providers/*`, which is agent-specific),
-    // not picked here.
-    return [];
+    if (this.order.length === 0) {
+      this.lastProbeError = 'No ACP agents enabled. Install and enable one in Settings › Model providers › ACP agents.';
+      return [];
+    }
+    const perAgent = await Promise.all(this.order.map(async (id) => {
+      const entry = this.agents.get(id)!;
+      try {
+        const conn = await this.ensureAgent(id);
+        const models = await conn.getModels();
+        return { id, models, error: models.length ? undefined : conn.getLastModelProbeError() };
+      } catch (err) {
+        return { id, models: [] as HarnessModel[], error: `${entry.launch.label}: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }));
+    const out: HarnessModel[] = [];
+    for (const { id, models } of perAgent) {
+      for (const m of models) out.push({ ...m, id: acpModelId(id, m.id), provider: 'acp', subProvider: id });
+    }
+    const errors = perAgent.filter((r) => r.models.length === 0 && r.error).map((r) => r.error!);
+    this.lastProbeError = out.length === 0 ? (errors.join(' · ') || 'No enabled ACP agent listed any models.') : undefined;
+    return out;
   }
 
-  // ── Conversation lifecycle ────────────────────────────────────────
+  /** One entry per enabled agent, in order — `HarnessProviderStatus.subProviders` (ACP-3). */
+  getSubProviders(): HarnessSubProviderStatus[] {
+    return this.order.map((id) => {
+      const entry = this.agents.get(id)!;
+      const s = this.agentStatus(id)!;
+      const authenticated = s.authState === 'authenticated' || s.authState === 'not_required';
+      return {
+        id,
+        label: entry.launch.label,
+        ...(entry.launch.mark ? { mark: entry.launch.mark } : {}),
+        ...(entry.launch.version ? { version: entry.launch.version } : {}),
+        installed: !entry.startError || !/not found|ENOENT/i.test(entry.startError),
+        connected: s.connected,
+        authState: s.authState,
+        authenticated,
+        ready: s.connected && s.models.length > 0,
+        ...(s.error ? { error: s.error } : {}),
+        modelCount: s.models.length,
+      };
+    });
+  }
+
+  // ── Routing ──────────────────────────────────────────────────────
+
+  private connFor(conversationId: string): AcpAgentConnection | null {
+    const binding = this.bindings.get(conversationId);
+    return binding ? this.peekAgent(binding.agentId) : null;
+  }
+
+  /** The agent a conversation with these params belongs to. */
+  private agentForParams(params: CreateConversationParams): string {
+    if (params.model && !['auto', 'default'].includes(params.model)) {
+      const { agentId } = splitAcpModelId(params.model);
+      if (this.agents.has(agentId)) return agentId;
+    }
+    const resumed = params.resumeProviderSessionId ? splitAcpModelId(params.resumeProviderSessionId).agentId : undefined;
+    if (resumed && this.agents.has(resumed)) return resumed;
+    const bound = this.bindings.get(params.conversationId)?.agentId;
+    if (bound && this.agents.has(bound)) return bound;
+    if (this.order.length === 1) return this.order[0]!;
+    if (params.model) throw new Error(`No enabled ACP agent serves the model "${params.model}". Enable its agent in Settings › Model providers › ACP agents.`);
+    throw new Error('Choose an ACP agent model: several ACP agents are enabled.');
+  }
+
+  /** The params as the agent's connection sees them: its own model value and session id. */
+  private paramsForAgent(agentId: string, params: CreateConversationParams, warnings: ConversationWarning[]): CreateConversationParams {
+    const { model, resumeProviderSessionId, ...rest } = params;
+    const own: CreateConversationParams = { ...rest };
+    if (model) {
+      const split = splitAcpModelId(model);
+      if (split.agentId === agentId && split.value) own.model = split.value;
+    }
+    if (resumeProviderSessionId) {
+      const split = splitAcpModelId(resumeProviderSessionId);
+      if (split.agentId === agentId && split.value) own.resumeProviderSessionId = split.value;
+      else {
+        delete own.resumeProviderSessionHarness;
+        warnings.push({ code: 'CONVERSATION_RESTARTED', params: { provider: 'acp', reason: 'the chat moved to another ACP agent' } });
+      }
+    }
+    return own;
+  }
+
+  private bind(conversationId: string, agentId: string, conn: AcpAgentConnection): void {
+    const old = this.bindings.get(conversationId);
+    old?.unsubscribe?.();
+    const unsubscribe = conn.onConversationEvent(conversationId, (event) => {
+      for (const h of this.listeners.get(conversationId) ?? []) h(event);
+    });
+    this.bindings.set(conversationId, { agentId, sessionId: conn.getProviderSessionId(conversationId), unsubscribe });
+  }
 
   async createConversation(params: CreateConversationParams): Promise<string> {
-    if (!this.connection) throw new Error('AcpProvider: not initialized (call initialize() first)');
-
-    const warnings: ConversationWarning[] = [];
-    if (params.autoCompact && !(params.autoCompact.enabled && params.autoCompact.thresholdPct == null)) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { field: 'autoCompact', provider: 'acp', reason: 'ACP has no compaction setting; the agent compacts by its own rules' },
-      });
-    }
-    if (this.opts.tierB ?? true) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { capability: 'computer-use, unrestricted shell', reason: 'Tier-B ACP agents cannot use this capability (L16 host gate)' },
-      });
-    }
-
-    // The chat's other mounts and its managed workspace root. ACP models this
-    // natively (`NewSessionRequest.additionalDirectories`, protocol
-    // `acp.generated.ts`), and the SDK exposes it as
-    // `SessionBuilder.withAdditionalDirectories` — so unlike Copilot this
-    // provider can widen the session's file-system scope without changing cwd.
-    // Agents that do not advertise the capability ignore the field; the
-    // `session/new` failure path below already reports a rejection.
-    const extraRoots = [...new Set(params.additionalDirectories ?? [])];
-
-    let session: acp.ActiveSession | null = null;
-    try {
-      const builder = this.connection.agent
-        .buildSession(params.workingDirectory ?? this.opts.defaultCwd ?? process.cwd());
-      if (extraRoots.length > 0) builder.withAdditionalDirectories(extraRoots);
-      session = await this.withDeadline(
-        builder.start(),
-        this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
-        'ACP session/new',
-      );
-    } catch (err) {
-      // The agent may not support `session/new` at all, or rejected the cwd.
-      // Surface it as a warning rather than throwing — a live conversation
-      // record is still useful so the caller can see why every send fails.
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { field: 'session/new', reason: `session/new failed: ${String(err)}` },
-      });
-    }
-
-    const conv: ConversationState = {
-      session,
-      params,
-      listeners: new Set(),
-      warnings,
-      inFlight: false,
-      turnSink: null,
-      commands: new Set(),
-      compacting: null,
-      compactionSummaries: new Map(),
-    };
-    this.conversations.set(params.conversationId, conv);
-    if (session) this.startPump(conv, session);
+    const agentId = this.agentForParams(params);
+    const conn = await this.ensureAgent(agentId);
+    const extra: ConversationWarning[] = [];
+    await conn.createConversation(this.paramsForAgent(agentId, params, extra));
+    conn.getConversationWarnings(params.conversationId).push(...extra);
+    this.bind(params.conversationId, agentId, conn);
     return params.conversationId;
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    const live = this.conversations.get(conversationId);
-    if (!live) {
-      if (params) await this.createConversation(params);
+    const binding = this.bindings.get(conversationId);
+    if (!params) {
+      if (binding) await (await this.ensureAgent(binding.agentId)).resumeConversation(conversationId);
       return;
     }
-    // "Edit sources" on a live chat (D-137) moves the cwd and extra roots, and
-    // an ACP session's are fixed by `session/new`. Without persistence there is
-    // no session to reload, so the move is a new session in the new roots —
-    // reported as CONVERSATION_RESTARTED so the caller hands it the transcript.
-    if (!params || live.inFlight || sameRoots(rootsOf(live.params, this.opts.defaultCwd), params, this.opts.defaultCwd)) return;
-    await this.deleteConversation(conversationId);
-    await this.createConversation(params);
-    this.conversations.get(conversationId)?.warnings.push({
-      code: 'CONVERSATION_RESTARTED',
-      params: { provider: 'acp', reason: 'session roots moved' },
-    });
+    const agentId = this.agentForParams(params);
+    if (binding && binding.agentId !== agentId) {
+      // Another agent's model: the conversation moves (the transcript is handed over).
+      await this.peekAgent(binding.agentId)?.deleteConversation(conversationId).catch(() => undefined);
+      binding.unsubscribe?.();
+      this.bindings.delete(conversationId);
+      const conn = await this.ensureAgent(agentId);
+      const fresh = { ...params };
+      delete fresh.resumeProviderSessionId;
+      delete fresh.resumeProviderSessionHarness;
+      await conn.createConversation(this.paramsForAgent(agentId, fresh, []));
+      conn.getConversationWarnings(conversationId).push({
+        code: 'CONVERSATION_RESTARTED',
+        params: { provider: 'acp', reason: 'the chat moved to another ACP agent' },
+      });
+      this.bind(conversationId, agentId, conn);
+      return;
+    }
+    const conn = await this.ensureAgent(agentId);
+    const warnings: ConversationWarning[] = [];
+    let own = this.paramsForAgent(agentId, params, warnings);
+    // The connection was re-created (an update, a crash) and no longer has the conversation: resume the session
+    // it had, so the agent keeps its memory.
+    if (!conn.hasLiveConversation(conversationId) && !own.resumeProviderSessionId && binding?.sessionId) {
+      own = { ...own, resumeProviderSessionId: binding.sessionId, resumeProviderSessionHarness: 'acp' };
+    }
+    await conn.resumeConversation(conversationId, own);
+    conn.getConversationWarnings(conversationId).push(...warnings);
+    this.bind(conversationId, agentId, conn);
   }
 
   hasLiveConversation(conversationId: string): boolean {
-    const conv = this.conversations.get(conversationId);
-    return conv != null && conv.session != null;
+    return this.connFor(conversationId)?.hasLiveConversation(conversationId) ?? false;
+  }
+
+  getProviderSessionId(conversationId: string): string | undefined {
+    const binding = this.bindings.get(conversationId);
+    if (!binding) return undefined;
+    const sessionId = this.peekAgent(binding.agentId)?.getProviderSessionId(conversationId) ?? binding.sessionId;
+    if (sessionId) binding.sessionId = sessionId;
+    return sessionId ? `${binding.agentId}/${sessionId}` : undefined;
+  }
+
+  async providerSessionExists(providerSessionId: string): Promise<boolean> {
+    const { agentId, value } = splitAcpModelId(providerSessionId);
+    if (!value || !this.agents.has(agentId)) return false;
+    const conn = await this.ensureAgent(agentId).catch(() => null);
+    return conn?.capabilities().sessionPersistence === true;
+  }
+
+  conversationHarness(_conversationId: string): 'acp' {
+    return 'acp';
   }
 
   async listConversations(): Promise<string[]> {
-    return [...this.conversations.keys()];
+    return [...this.bindings.keys()];
   }
 
   async getLastConversationId(): Promise<string | null> {
-    const ids = [...this.conversations.keys()];
+    const ids = [...this.bindings.keys()];
     return ids[ids.length - 1] ?? null;
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
-    const conv = this.conversations.get(conversationId);
-    if (!conv) return;
-    if (conv.session && this.connection) {
-      conv.session.dispose();
-      // Best-effort: not every agent implements session/close.
-      try {
-        // Bounded, and best-effort: an agent that never answers `session/close`
-        // must not be able to block a conversation delete.
-        await this.withDeadline(
-          this.connection.agent.request(acpRuntime().methods.agent.session.close, {
-            sessionId: conv.session.sessionId,
-          }),
-          this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
-          'ACP session/close',
-        );
-      } catch { /* best effort */ }
-    }
-    this.conversations.delete(conversationId);
+    const binding = this.bindings.get(conversationId);
+    if (!binding) return;
+    binding.unsubscribe?.();
+    this.bindings.delete(conversationId);
+    await this.peekAgent(binding.agentId)?.deleteConversation(conversationId);
   }
 
   async destroyConversation(conversationId: string): Promise<void> {
     await this.deleteConversation(conversationId);
   }
 
+  async forkConversation(conversationId: string, options: ForkConversationOptions): Promise<ForkConversationResult> {
+    const agentId = this.bindings.get(conversationId)?.agentId
+      ?? (options.sourceProviderSessionId ? splitAcpModelId(options.sourceProviderSessionId).agentId : undefined);
+    if (!agentId) throw new Error(`AcpProvider: no agent for conversation "${conversationId}"`);
+    const conn = await this.ensureAgent(agentId);
+    const source = options.sourceProviderSessionId ? splitAcpModelId(options.sourceProviderSessionId).value : undefined;
+    const result = await conn.forkConversation(conversationId, {
+      ...options,
+      ...(source ? { sourceProviderSessionId: source } : {}),
+      params: this.paramsForAgent(agentId, { ...options.params, conversationId: options.newConversationId }, []),
+    });
+    this.bind(options.newConversationId, agentId, conn);
+    return result.providerSessionId ? { ...result, providerSessionId: `${agentId}/${result.providerSessionId}` } : result;
+  }
+
+  async compactConversation(conversationId: string, options?: CompactConversationOptions): Promise<void> {
+    const conn = this.requireConn(conversationId);
+    await conn.compactConversation(conversationId, options);
+  }
+
   getConversationWarnings(conversationId: string): ConversationWarning[] {
-    return this.conversations.get(conversationId)?.warnings ?? [];
+    return this.connFor(conversationId)?.getConversationWarnings(conversationId) ?? [];
   }
 
-  async selectAgent(_conversationId: string, _agentName: string): Promise<void> {
-    // ACP addresses one agent per connection; in-session switching is not supported.
-  }
+  async selectAgent(): Promise<void> { /* one ACP agent per conversation */ }
 
-  async listAgents(_conversationId: string): Promise<HarnessAgentInfo[]> {
+  async listAgents(): Promise<HarnessAgentInfo[]> {
     return [];
+  }
+
+  runtimeDiagnostics(): HarnessRuntimeDiagnostics {
+    const providers: Record<string, Omit<HarnessRuntimeDiagnostics, 'providers'>> = {};
+    let liveConversations = 0;
+    let liveSessions = 0;
+    for (const id of this.order) {
+      const d = this.peekAgent(id)?.runtimeDiagnostics();
+      if (!d) continue;
+      providers[id] = d;
+      liveConversations += d.liveConversations;
+      liveSessions += d.liveSessions;
+    }
+    return { liveConversations, liveSessions, warmSessions: 0, providers };
   }
 
   // ── Messaging ────────────────────────────────────────────────────
 
-  async sendPrompt(
-    conversationId: string,
-    prompt: string,
-    attachments?: AttachmentRef[],
-    _options?: SendPromptOptions,
-  ): Promise<void> {
-    // Fire-and-forget, but never un-caught: `sendPromptAndWait` rejects on
-    // several paths (no conversation, no live session, turn already in flight,
-    // agent error) and an unhandled rejection can take the process down.
-    void this.sendPromptAndWait(conversationId, prompt, attachments).catch((err: unknown) => {
-      const conv = this.conversations.get(conversationId);
+  private requireConn(conversationId: string): AcpAgentConnection {
+    const binding = this.bindings.get(conversationId);
+    if (!binding) throw new Error(`AcpProvider: no conversation "${conversationId}"`);
+    const conn = this.peekAgent(binding.agentId);
+    if (!conn) throw new Error(`AcpProvider: the agent "${binding.agentId}" of conversation "${conversationId}" is not running`);
+    return conn;
+  }
+
+  async sendPrompt(conversationId: string, prompt: string, attachments?: AttachmentRef[], options?: SendPromptOptions): Promise<void> {
+    let conn: AcpAgentConnection;
+    try {
+      conn = this.requireConn(conversationId);
+    } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (conv) this.broadcast(conv, { kind: 'harness.error', data: { message, provider: 'acp' } });
-      this.opts.logger?.warn?.(`[AcpProvider] sendPrompt("${conversationId}") failed: ${message}`);
-    });
+      for (const h of this.listeners.get(conversationId) ?? []) h({ kind: 'harness.error', data: { message, provider: 'acp' } });
+      return;
+    }
+    await conn.sendPrompt(conversationId, prompt, attachments, options);
   }
 
   async sendPromptAndWait(
     conversationId: string,
     prompt: string,
-    _attachments?: AttachmentRef[],
+    attachments?: AttachmentRef[],
     signal?: AbortSignal,
-    _options?: SendPromptOptions,
+    options?: SendPromptOptions,
   ): Promise<ConversationResponse> {
-    const conv = this.conversations.get(conversationId);
-    if (!conv) throw new Error(`AcpProvider: no conversation "${conversationId}"`);
-    if (!conv.session) throw new Error(`AcpProvider: conversation "${conversationId}" has no live ACP session (see getConversationWarnings)`);
-    if (conv.inFlight) throw new Error(`AcpProvider: conversation "${conversationId}" already has a turn in flight`);
-
-    // A signal that is ALREADY aborted must not start a turn. Nothing checked
-    // this, so a caller whose run had been cancelled before the stage reached
-    // the provider still sent the prompt, paid for it, and only discovered the
-    // cancellation once the agent answered.
-    if (signal?.aborted) {
-      this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'acp' } });
-      return { content: '' };
-    }
-
-    conv.inFlight = true;
-    const session = conv.session;
-    const sink = createTurnSink();
-    conv.turnSink = sink;
-    let assistantText = '';
-    /** Tool calls announced but not yet resolved — see the W13-B1 guard below. */
-    const openToolCallIds = new Set<string>();
-
-    const onAbort = () => {
-      void this.connection?.agent
-        .notify(acpRuntime().methods.agent.session.cancel, { sessionId: session.sessionId })
-        .catch(() => { /* best effort */ });
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    try {
-      // `prompt(...)` resolves when the turn ends, but the SAME completion
-      // is also queued as a `stop` message for `nextUpdate()` — draining
-      // that queue is what lets us stream tokens AS they arrive instead of
-      // only seeing the final text after the whole turn finishes. A request
-      // failure rejects BOTH `promptPromise` and the update queue (the SDK's
-      // `ActiveSession.prompt()` routes its own rejection into
-      // `updates.reject(...)`), so `nextUpdate()` below throws first in the
-      // normal case; the no-op `.catch` here only stops Node from flagging
-      // `promptPromise` itself as an unhandled rejection when that happens —
-      // the real error still surfaces from the `await promptPromise` after
-      // the loop (or from the loop's own throw, whichever runs first).
-      const promptPromise = session.prompt(prompt);
-      promptPromise.catch(() => { /* see comment above */ });
-
-      for (;;) {
-        const message = await sink.next();
-        if (message.kind === 'stop') {
-          if (message.stopReason === 'cancelled') {
-            this.endOwnCompaction(conv, 'Compaction stopped');
-            this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'acp' } });
-          } else {
-            // W13-B1 — ACP's `StopReason` includes `max_tokens`, and this
-            // provider had no guard for it: a turn cut off mid-tool-call
-            // emitted `harness.idle` and left every open call dangling, so the
-            // agent waited forever for a result and the caller saw a clean
-            // "done". Fail them, exactly as Codex/OpenCode/Claude do.
-            if (message.stopReason === 'max_tokens') {
-              for (const callId of openToolCallIds) {
-                this.broadcast(conv, {
-                  kind: 'harness.tool_complete',
-                  data: {
-                    tool: callId,
-                    result: `Response was truncated (stopReason: ${message.stopReason}). All tool calls in this batch are cancelled. Please re-issue your request.`,
-                    callId,
-                    success: false,
-                  },
-                });
-              }
-            }
-            this.endOwnCompaction(conv);
-            this.broadcast(conv, { kind: 'harness.idle', data: {} });
-          }
-          break;
-        }
-        this.applySessionUpdate(conv, message.update, openToolCallIds);
-        if (message.update.sessionUpdate === 'agent_message_chunk') {
-          assistantText += textOf(message.update.content);
-        }
-      }
-
-      await promptPromise;
-      return { content: assistantText };
-    } catch (err) {
-      if (signal?.aborted) {
-        this.endOwnCompaction(conv, 'Compaction stopped');
-        this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'acp' } });
-        return { content: assistantText };
-      }
-      this.endOwnCompaction(conv, String(err));
-      this.broadcast(conv, { kind: 'harness.error', data: { message: String(err), provider: 'acp' } });
-      throw err;
-    } finally {
-      signal?.removeEventListener('abort', onAbort);
-      conv.inFlight = false;
-      if (conv.turnSink === sink) conv.turnSink = null;
-      sink.finish();
-    }
+    return this.requireConn(conversationId).sendPromptAndWait(conversationId, prompt, attachments, signal, options);
   }
 
-  /**
-   * The one reader of a session's update queue (see `ConversationState.turnSink`). Ends when the queue fails for
-   * good — the session was disposed or the connection closed — which is an error with no turn to hand it to.
-   */
-  private startPump(conv: ConversationState, session: acp.ActiveSession): void {
-    const idleTools = new Set<string>();
-    void (async () => {
-      for (;;) {
-        let message: acp.ActiveSessionMessage;
-        try {
-          message = await session.nextUpdate();
-        } catch (err) {
-          const sink = conv.turnSink;
-          if (!sink || conv.session !== session) return;
-          // A prompt's failure rejects the readers of the moment only; the turn decides, then reading resumes.
-          sink.fail(err);
-          await sink.done;
-          continue;
-        }
-        if (conv.turnSink) conv.turnSink.push(message);
-        else if (message.kind === 'session_update') this.applySessionUpdate(conv, message.update, idleTools);
-      }
-    })();
-  }
-
-  /**
-   * `/compact` as a prompt (an agent advertising the `compact` command, e.g. claude-agent-acp): resolves when that
-   * turn ends. The agent's `compaction_update`s report it; one that sends none is reported around the turn here.
-   */
-  async compactConversation(conversationId: string, options?: CompactConversationOptions): Promise<void> {
-    const conv = this.conversations.get(conversationId);
-    if (!conv) throw new Error(`AcpProvider: no conversation "${conversationId}"`);
-    if (!conv.commands.has('compact')) {
-      throw new Error('AcpProvider: this agent does not offer compaction (it advertises no `compact` command).');
-    }
-    if (conv.inFlight) throw new Error(`AcpProvider: conversation "${conversationId}" already has a turn in flight`);
-    const instructions = options?.instructions?.trim();
-    conv.compacting = { startReported: false, endReported: false, summary: '' };
-    this.reportCompaction(conv, COMPACTION_INFO.start, 'manual');
-    conv.compacting.startReported = true;
-    try {
-      await this.sendPromptAndWait(conversationId, `/compact${instructions ? ` ${instructions}` : ''}`);
-    } finally {
-      conv.compacting = null;
-    }
-  }
-
-  /** Our `/compact` turn ended: report its end unless the agent already did. */
-  private endOwnCompaction(conv: ConversationState, error?: string): void {
-    const ours = conv.compacting;
-    if (!ours || ours.endReported) return;
-    ours.endReported = true;
-    if (error) this.reportCompaction(conv, COMPACTION_INFO.failed, 'manual', { error });
-    else this.reportCompaction(conv, COMPACTION_INFO.boundary, 'manual', ours.summary ? { summary: ours.summary } : {});
-  }
-
-  private reportCompaction(
-    conv: ConversationState,
-    infoType: (typeof COMPACTION_INFO)[keyof typeof COMPACTION_INFO],
-    trigger: CompactionTrigger,
-    extra: { summary?: string; error?: string } = {},
-  ): void {
-    const message =
-      infoType === COMPACTION_INFO.start
-        ? 'Compacting conversation…'
-        : infoType === COMPACTION_INFO.failed
-          ? `Compaction failed${extra.error ? `: ${extra.error}` : ''}`
-          : describeCompaction({ trigger });
-    this.broadcast(conv, { kind: 'harness.session_info', data: { infoType, message, trigger, provider: 'acp', ...extra } });
-  }
-
-  /** `compaction_update` → the shared compaction events; ours (a `/compact` in flight) or the agent's own (auto). */
-  private applyCompactionUpdate(conv: ConversationState, update: acp.CompactionUpdate): void {
-    const ours = conv.compacting;
-    const trigger: CompactionTrigger = ours ? 'manual' : 'auto';
-    const summary = update.summary ? update.summary.map(textOf).join('') : conv.compactionSummaries.get(update.compactionId);
-    switch (update.status) {
-      case 'in_progress':
-        if (ours?.startReported) return;
-        if (ours) ours.startReported = true;
-        this.reportCompaction(conv, COMPACTION_INFO.start, trigger);
-        return;
-      case 'completed':
-        conv.compactionSummaries.delete(update.compactionId);
-        if (ours) {
-          if (ours.endReported) return;
-          ours.endReported = true;
-        }
-        this.reportCompaction(conv, COMPACTION_INFO.boundary, trigger, summary ? { summary } : {});
-        return;
-      case 'failed':
-      case 'cancelled':
-        conv.compactionSummaries.delete(update.compactionId);
-        if (ours) {
-          if (ours.endReported) return;
-          ours.endReported = true;
-        }
-        this.reportCompaction(conv, COMPACTION_INFO.failed, trigger, {
-          error: update.error ?? (update.status === 'cancelled' ? 'Compaction cancelled' : 'Compaction failed'),
-        });
-        return;
-      default:
-        return; // a future status: wait for one we know
-    }
-  }
-
-  /** Translate one `session/update` notification into `AgentEvent`(s). */
-  private applySessionUpdate(
-    conv: ConversationState,
-    update: acp.SessionUpdate,
-    openToolCallIds: Set<string>,
-  ): void {
-    switch (update.sessionUpdate) {
-      case 'agent_message_chunk': {
-        const text = textOf(update.content);
-        if (text) this.broadcast(conv, { kind: 'harness.token', data: { text } });
-        break;
-      }
-      case 'agent_thought_chunk': {
-        const text = textOf(update.content);
-        if (text) this.broadcast(conv, { kind: 'harness.reasoning_delta', data: { text } });
-        break;
-      }
-      case 'user_message_chunk':
-        break; // Echo of what we sent — nothing new to report.
-      case 'tool_call': {
-        openToolCallIds.add(update.toolCallId);
-        this.broadcast(conv, {
-          kind: 'harness.tool_start',
-          data: { tool: update.title, args: update.rawInput, callId: update.toolCallId },
-        });
-        break;
-      }
-      case 'tool_call_update': {
-        if (update.status === 'completed' || update.status === 'failed') {
-          // Pruned here so the truncation guard fails only calls still open.
-          openToolCallIds.delete(update.toolCallId);
-          this.broadcast(conv, {
-            kind: 'harness.tool_complete',
-            data: {
-              tool: update.toolCallId,
-              result: update.rawOutput ?? update.content ?? null,
-              callId: update.toolCallId,
-              success: update.status === 'completed',
-            },
-          });
-        }
-        break;
-      }
-      case 'plan':
-      case 'plan_update':
-      case 'plan_removed':
-        this.broadcast(conv, { kind: 'harness.plan_changed', data: { operation: update.sessionUpdate } });
-        break;
-      case 'available_commands_update':
-        conv.commands = new Set(update.availableCommands.map((c) => c.name.replace(/^\//, '')));
-        break;
-      case 'usage_update':
-        this.broadcast(conv, {
-          kind: 'harness.context_usage',
-          data: { provider: 'acp', source: 'provider', currentTokens: update.used, promptTokenLimit: update.size },
-        });
-        break;
-      case 'compaction_update':
-        this.applyCompactionUpdate(conv, update);
-        break;
-      case 'compaction_summary_chunk': {
-        const text = textOf(update.content);
-        conv.compactionSummaries.set(update.compactionId, (conv.compactionSummaries.get(update.compactionId) ?? '') + text);
-        if (conv.compacting) conv.compacting.summary += text;
-        break;
-      }
-      default:
-        // available_commands_update / current_mode_update / config_option_update /
-        // session_info_update / usage_update / compaction_update /
-        // compaction_summary_chunk — informational, preserved for visibility
-        // rather than silently dropped.
-        this.broadcast(conv, {
-          kind: 'harness.session_info',
-          data: { infoType: update.sessionUpdate, message: `ACP ${update.sessionUpdate}`, raw: update },
-        });
-        break;
-    }
-  }
-
-  async getMessages(_conversationId: string): Promise<ConversationMessage[]> {
-    // ACP does not expose message history retrieval; return empty.
+  async getMessages(): Promise<ConversationMessage[]> {
     return [];
   }
 
   async abortConversation(conversationId: string): Promise<void> {
-    const conv = this.conversations.get(conversationId);
-    if (!conv?.session || !conv.inFlight) return;
-    // W13: emit harness.cancelled immediately rather than waiting for the
-    // agent to acknowledge — the notify below is fire-and-forget by design.
-    this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'acp' } });
-    void this.connection?.agent
-      .notify(acpRuntime().methods.agent.session.cancel, { sessionId: conv.session.sessionId })
-      .catch(() => { /* best effort */ });
+    await this.connFor(conversationId)?.abortConversation(conversationId);
   }
 
-  // ── Permission gate (L16 Tier-B host gate + domain callback) ──────
-
-  private async handleRequestPermission(
-    params: acp.RequestPermissionRequest,
-  ): Promise<acp.RequestPermissionResponse> {
-    // A throw here escapes as a JSON-RPC internal error (-32603), which is NOT
-    // a denial: what the agent does with an errored permission request is the
-    // agent's business, and we have just handed an untrusted process a
-    // non-answer. A gate that can error is a gate that can fail open, so every
-    // path — including a bug in this method — resolves to an explicit reject.
-    try {
-      return await this.decidePermission(params);
-    } catch (err) {
-      this.opts.logger?.warn?.(
-        `[AcpProvider] permission gate errored for tool "${params.toolCall.title ?? params.toolCall.toolCallId}" — denying (fail-closed): ${String(err)}`,
-      );
-      return this.rejectOutcome(params);
+  onConversationEvent(conversationId: string, handler: Listener<AgentEvent>): () => void {
+    let set = this.listeners.get(conversationId);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(conversationId, set);
     }
-  }
-
-  /** The reject/cancel outcome for a request, preferring an explicit reject option. */
-  private rejectOutcome(params: acp.RequestPermissionRequest): acp.RequestPermissionResponse {
-    const reject = findOption(params.options, ['reject_once', 'reject_always']);
-    return reject
-      ? { outcome: { outcome: 'selected', optionId: reject.optionId } }
-      : { outcome: { outcome: 'cancelled' } };
-  }
-
-  private async decidePermission(
-    params: acp.RequestPermissionRequest,
-  ): Promise<acp.RequestPermissionResponse> {
-    const conv = [...this.conversations.values()].find((c) => c.session?.sessionId === params.sessionId);
-    const tierB = this.opts.tierB ?? true; // fail-closed default
-
-    if (tierB && isTierBBlocked(params.toolCall)) {
-      if (conv) {
-        this.broadcast(conv, {
-          kind: 'harness.tool_complete',
-          data: {
-            tool: params.toolCall.title ?? params.toolCall.toolCallId,
-            result:
-              `Tool "${params.toolCall.title ?? params.toolCall.toolCallId}" (kind: ${params.toolCall.kind ?? 'unspecified'}) ` +
-              `is blocked for Tier-B ACP agents (L16 host gate). Permitted kinds: ${[...TIER_B_ALLOWED_KINDS].join(', ')}.`,
-            callId: params.toolCall.toolCallId,
-            success: false,
-          },
-        });
-      }
-      return this.rejectOutcome(params);
-    }
-
-    const onPermissionRequest = conv?.params.onPermissionRequest;
-    if (onPermissionRequest) {
-      const kind = params.toolCall.kind;
-      const domainType: 'file_write' | 'file_read' | 'shell_exec' | 'network' | 'other' =
-        kind === 'edit' || kind === 'delete' || kind === 'move' ? 'file_write'
-        : kind === 'read' ? 'file_read'
-        : kind === 'execute' ? 'shell_exec'
-        : kind === 'fetch' ? 'network'
-        : 'other';
-      // Bounded. The callback may be waiting on a human, so the deadline is
-      // generous — but it must exist: the agent's JSON-RPC request is held open
-      // for the whole wait, and an approver who never answers otherwise pins
-      // that request (and the agent's turn) for the process's lifetime.
-      const decision = await this.withDeadline(
-        onPermissionRequest({
-          type: domainType,
-          description: params.toolCall.title ?? `ACP tool call ${params.toolCall.toolCallId}`,
-          details: { rawInput: params.toolCall.rawInput },
-        }),
-        this.opts.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS,
-        `permission decision for "${params.toolCall.title ?? params.toolCall.toolCallId}"`,
-      );
-      const wanted: acp.PermissionOptionKind[] = decision.granted
-        ? ['allow_once', 'allow_always']
-        : ['reject_once', 'reject_always'];
-      const chosen = findOption(params.options, wanted);
-      if (chosen) return { outcome: { outcome: 'selected', optionId: chosen.optionId } };
-      // No option of the wanted kind exists. `cancelled` is the safe answer
-      // either way: it grants nothing.
-      return { outcome: { outcome: 'cancelled' } };
-    }
-
-    // No domain callback wired. For a NON-Tier-B (trusted) agent the caller has
-    // explicitly opted out of the host gate, so approve. A Tier-B agent never
-    // reaches here with a disallowed kind — the allowlist above already
-    // rejected it — so what is approved is read/search/think only.
-    const allow = findOption(params.options, ['allow_once', 'allow_always']);
-    return allow
-      ? { outcome: { outcome: 'selected', optionId: allow.optionId } }
-      : { outcome: { outcome: 'cancelled' } };
-  }
-
-  // ── Events ────────────────────────────────────────────────────────
-
-  onConversationEvent(
-    conversationId: string,
-    handler: Listener<AgentEvent>,
-  ): UnsubFn {
-    const conv = this.conversations.get(conversationId);
-    if (!conv) return () => { /* noop */ };
-    conv.listeners.add(handler);
-    return () => conv.listeners.delete(handler);
-  }
-
-  // ── Private helpers ───────────────────────────────────────────────
-
-  private broadcast(conv: ConversationState, event: AgentEvent): void {
-    for (const h of conv.listeners) h(event);
+    set.add(handler);
+    return () => {
+      set.delete(handler);
+      if (set.size === 0) this.listeners.delete(conversationId);
+    };
   }
 }
