@@ -10,6 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ReactNode } from 'react';
+import type { ProviderMark } from '@generatorai/shared';
 import { cn } from '@/ui/lib/cn.js';
 import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
 import { Icon } from '@/ui/icons/Icon.js';
@@ -29,6 +30,8 @@ export interface AgentTurnHeaderProps {
   avatar?: 'initials' | 'bot';
   /** The provider answered as itself (no named agent): its logo replaces the initials (D-132). */
   avatarProvider?: string | undefined;
+  /** The mark of the ACP agent that ran the turn: drawn in place of the provider's logo in both places. */
+  providerMark?: ProviderMark | undefined;
   /** The turn is collapsed: show this digest line after the name. */
   digest?: string | undefined;
   /** Hover detail (the usage chip of a finished turn). */
@@ -46,6 +49,7 @@ export function AgentTurnHeader({
   timestamp,
   avatar = 'initials',
   avatarProvider,
+  providerMark,
   digest,
   usage,
   trailing,
@@ -60,7 +64,7 @@ export function AgentTurnHeader({
         </span>
       ) : avatarProvider ? (
         <span className="flex size-5 shrink-0 items-center justify-center rounded-control-sm bg-selected">
-          <ProviderLogo provider={avatarProvider} size={14} />
+          <ProviderLogo provider={avatarProvider} mark={providerMark} size={14} />
         </span>
       ) : (
         <Avatar name={agentName} size={20} decorative />
@@ -68,7 +72,7 @@ export function AgentTurnHeader({
       <span className="shrink-0 font-medium text-fg">{agentName}</span>
       {model ? (
         <span className="flex min-w-0 items-center gap-1 text-fg-3">
-          {provider ? <ProviderLogo provider={provider} size={12} /> : null}
+          {provider ? <ProviderLogo provider={provider} mark={providerMark} size={12} /> : null}
           <span className="min-w-0 truncate">{model}</span>
         </span>
       ) : null}

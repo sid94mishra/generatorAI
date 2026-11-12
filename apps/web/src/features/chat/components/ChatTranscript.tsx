@@ -32,7 +32,7 @@ import {
   type TranscriptActions,
 } from '@/blocks/transcript/index.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
-import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
+import { useModelSource } from '@/blocks/model-picker/useModelLabel.js';
 import type { ChatView } from '../hooks/useChatView.js';
 import { MessageActions } from './MessageActions.js';
 import { RewindMenu } from './RewindMenu.js';
@@ -108,7 +108,8 @@ const ChatLiveTurn = memo(function ChatLiveTurn({ sessionId, agentName, harnessP
     };
   }, [stream?.usage, status]);
 
-  const modelName = useModelLabel(usage?.model);
+  const source = useModelSource(usage?.model);
+  const modelName = source?.name;
 
   return (
     <LiveTurn
@@ -116,6 +117,7 @@ const ChatLiveTurn = memo(function ChatLiveTurn({ sessionId, agentName, harnessP
       avatarProvider={harnessProvider ? (usage?.provider ?? harnessProvider) : undefined}
       model={usage?.model ? (modelName ?? usage.model) : undefined}
       provider={usage?.provider}
+      providerMark={source?.agent?.mark}
       usage={usage ? <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} scopeId={sessionId} /> : undefined}
       segments={hasContent ? segments : undefined}
       streamKey={sessionId}

@@ -12,6 +12,7 @@
 
 import type { ReactNode } from 'react';
 import type { StreamSegment, TimelineStep } from '@generatorai/client-core';
+import type { ProviderMark } from '@generatorai/shared';
 import { AgentTurnHeader } from '../AgentTurnHeader/AgentTurnHeader.js';
 import { ThinkingPlaceholder } from '../ThoughtPill/ThoughtPill.js';
 import { StoppedNote } from '../TranscriptTurn/TranscriptTurn.js';
@@ -25,6 +26,8 @@ export interface LiveTurnProps {
   /** Model label, once the provider reported it. */
   model?: string | undefined;
   provider?: string | undefined;
+  /** The ACP agent's mark, drawn in place of the provider's logo. */
+  providerMark?: ProviderMark | undefined;
   /** Usage chip for the header, once the turn finished. */
   usage?: ReactNode;
   /** Ordered segments — or, for a persisted split view, `steps` + `answer`. */
@@ -53,6 +56,7 @@ export function LiveTurn({
   avatarProvider,
   model,
   provider,
+  providerMark,
   usage,
   segments,
   steps,
@@ -76,6 +80,7 @@ export function LiveTurn({
         avatarProvider={avatarProvider}
         model={model}
         provider={provider}
+        providerMark={providerMark}
         usage={usage}
       />
       {hasContent || error ? (

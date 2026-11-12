@@ -12,8 +12,8 @@
 import { createContext, useCallback, useContext } from 'react';
 import { useNavigate } from 'react-router';
 import type { Chat, SideChatMode } from '@generatorai/shared';
-import { harnessProviderLabel } from '@generatorai/shared/ui-contract';
 import { Composer } from '@/blocks/composer/index.js';
+import { useHarnessLabel } from '@/blocks/model-picker/useModelLabel.js';
 import type { DockPanelProps } from '@/blocks/dock/index.js';
 import { parseSideTabId } from '@/lib/sideTabId.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
@@ -67,6 +67,7 @@ function SideChatView({ chatId }: { chatId: string }) {
   const view = useChatView({ chatId, dockOpen: false, setDockOpen: noop, toggleDock: noop });
   const { chat, sessionId, workspace, stream, stopRewind, gates } = view;
   const { isWorking } = stream;
+  const harnessLabel = useHarnessLabel(workspace.harnessProvider, chat?.model);
   const sendPrompt = view.sendPrompt;
   const send = useCallback(
     async ({ prompt, attachments, mode, chatRefs }: { prompt: string; attachments: File[]; mode?: 'auto' | 'plan'; chatRefs?: Array<{ chatId: string; mode: 'auto' | 'summary' | 'recent' | 'full' }> }) => {
@@ -102,7 +103,6 @@ function SideChatView({ chatId }: { chatId: string }) {
   const mode: SideChatMode = chat.sideMode ?? 'new';
   const kept = !chat.sideOfChatId;
   const agentName = chat.agentSnapshot?.driving?.name;
-  const harnessLabel = workspace.harnessProvider ? harnessProviderLabel(workspace.harnessProvider) : null;
   const items: MenuButtonItem[] = [
     ...(kept ? [] : [{ id: 'keep', label: 'Keep as a chat', icon: 'pin' as const, onSelect: () => ctx.keep(chat.id) }]),
     { id: 'open', label: 'Open as main chat', icon: 'external-link', onSelect: () => navigate(`/chats/${chat.id}`) },

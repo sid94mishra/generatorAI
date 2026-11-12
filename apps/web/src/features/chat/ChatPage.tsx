@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
-import { composerPromptPlaceholder, harnessProviderLabel, TRANSCRIPT_COPY, type ApprovalMode } from '@generatorai/shared/ui-contract';
+import { composerPromptPlaceholder, TRANSCRIPT_COPY, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import {
@@ -45,6 +45,7 @@ import { ChangesDockContext, ChangesDockPanel } from '@/blocks/changes/ChangesDo
 import type { ChangesPanelProps } from '@/blocks/changes/ChangesPanel.js';
 import { ChangesTray, Composer, type ComposerAttachment } from '@/blocks/composer/index.js';
 import { Dock, useDockOpen, useSurfaceDockTabs, type DockRegistry } from '@/blocks/dock/index.js';
+import { useHarnessLabel } from '@/blocks/model-picker/useModelLabel.js';
 import { FileDockPanel, FilesDockPanel, FilesDockProvider, useFileTabs } from '@/blocks/files/useFileTabs.js';
 import { SourcesBlock } from '@/blocks/files/SourcesBlock.js';
 import { TerminalDockPanel, TerminalDockProvider, terminalTabLabel, type TerminalDockContextValue } from '@/blocks/terminal/terminalDock.js';
@@ -120,7 +121,7 @@ export function ChatPage() {
   useMarkChatRead(chatId, isWorking);
   const { messages, promptHistory } = transcript;
   const { stop, canRewind, restoredDraft } = stopRewind;
-  const activeHarnessLabel = workspace.harnessProvider ? harnessProviderLabel(workspace.harnessProvider) : null;
+  const activeHarnessLabel = useHarnessLabel(workspace.harnessProvider, chat?.model);
 
   // The turn is parked on a gate: the agent is idle and the ball is with the user.
   const awaitingUserDecision = useStreamStore((state) =>

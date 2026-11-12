@@ -36,7 +36,7 @@ import { AttachmentList } from '../UserMessage/AttachmentList.js';
 import { UserMessage } from '../UserMessage/UserMessage.js';
 import type { ChatRefChip } from '../UserMessage/ChatRefList.js';
 import { useTranscriptActions } from '../transcriptContext.js';
-import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
+import { useModelSource } from '@/blocks/model-picker/useModelLabel.js';
 
 export interface TranscriptTurnProps {
   turn: TurnModel;
@@ -110,9 +110,10 @@ function AgentResponse({
   const turnModel = message.metadata?.model;
   const turnProvider = message.metadata?.provider;
   // With no named agent the provider answers as itself: a chat moved between providers names each turn's own
-  // ("Claude Code · Sonnet 5.5"), not the one it runs on now ("Codex · Sonnet 5.5").
-  const headerName = harnessProvider && turnProvider ? harnessProviderLabel(turnProvider) : agentName;
-  const modelName = useModelLabel(turnModel);
+  // ("Claude Code · Sonnet 5.5"), not the one it runs on now ("Codex · Sonnet 5.5"); an ACP turn names its agent.
+  const source = useModelSource(turnModel);
+  const modelName = source?.name;
+  const headerName = harnessProvider && turnProvider ? (source?.agent?.label ?? harnessProviderLabel(turnProvider)) : agentName;
   const partial = message.metadata?.partial === true;
   const folded = collapsed && !summary;
   // Counted from the segments already derived for rendering, so a mode switch never re-derives it.
@@ -137,6 +138,7 @@ function AgentResponse({
           avatarProvider={harnessProvider ? (turnProvider ?? harnessProvider) : undefined}
           model={turnModel ? (modelName ?? turnModel) : undefined}
           provider={turnProvider}
+          providerMark={source?.agent?.mark}
           timestamp={message.timestamp}
           {...(digestLine ? { digest: digestLine } : {})}
           trailing={
